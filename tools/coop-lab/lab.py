@@ -5,7 +5,7 @@ relay with simulated lag (relay mode) or directly (direct mode), and prints each
 whether the games stayed in sync and how long inputs took to reach the game.
 
   python tools/coop-lab/lab.py --swf <BadIceCream_coop.swf> [--mode relay|direct|both]
-      [--frames 4500] [--lag 40] [--jitter 10] [--delay 3]
+      [--frames 4500] [--lag 40] [--jitter 10] [--delay N]
 
 Nothing touches the keyboard or mouse; test ports avoid the ones real games use.
 """
@@ -37,8 +37,9 @@ def free_port():
 
 
 def player(args, role_args, name, out):
+    delay = ["--coop-delay", str(args.delay)] if args.delay is not None else []
     cmd = [RUFFLE, "--coop-headless", "--coop-frames", str(args.frames), "--coop-script", SCRIPT,
-           "--coop-delay", str(args.delay), "--coop-name", name] + role_args + [args.swf]
+           "--coop-name", name] + delay + role_args + [args.swf]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     out[name] = {"proc": proc, "lines": []}
     return proc
@@ -113,11 +114,11 @@ def main():
     ap.add_argument("--frames", type=int, default=4500, help="4500 frames = 3 minutes at 25 fps")
     ap.add_argument("--lag", type=float, default=40, help="relay: one-way delay, ms")
     ap.add_argument("--jitter", type=float, default=10, help="relay: extra random delay 0..N ms")
-    ap.add_argument("--delay", type=int, default=3, help="input delay, frames")
+    ap.add_argument("--delay", type=int, help="input delay, frames (default: the host picks it from the ping)")
     args = ap.parse_args()
     for mode in (["relay", "direct"] if args.mode == "both" else [args.mode]):
         extra = " (lag %g ms one way + 0-%g ms jitter)" % (args.lag, args.jitter) if mode == "relay" else ""
-        print("== %s, %d frames, input delay %d frames%s" % (mode, args.frames, args.delay, extra))
+        print("== %s, %d frames, input delay %s%s" % (mode, args.frames, args.delay if args.delay is not None else "auto", extra))
         print(run(args, mode))
         sys.stdout.flush()
 

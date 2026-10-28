@@ -54,9 +54,10 @@ pub struct CoopOpt {
     #[clap(long, value_name = "CODE", help_heading = "Ruffle Together")]
     pub coop_code: Option<String>,
 
-    /// Host: input delay in frames (the same for every player).
-    #[clap(long, default_value_t = 3, help_heading = "Ruffle Together")]
-    pub coop_delay: u32,
+    /// Host: input delay in frames (the same for every player); without it the host measures
+    /// the ping when the friend connects and picks the smallest delay that runs smoothly.
+    #[clap(long, help_heading = "Ruffle Together")]
+    pub coop_delay: Option<u32>,
 
     /// Your name, shown to the other players.
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]

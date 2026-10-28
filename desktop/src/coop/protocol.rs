@@ -31,6 +31,9 @@ pub enum Msg {
     Print { player: u8, frame: u32, hash: u64 },
     Bye { player: u8, reason: String },
     Refuse { reason: String },
+    /// Host to a friend before the start: the round trip picks the input delay.
+    Ping { seq: u32 },
+    Pong { seq: u32 },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -82,6 +85,8 @@ pub fn encode(msg: &Msg) -> String {
         } => format!("FP|{player}|{frame}|{hash:016x}"),
         Msg::Bye { player, reason } => format!("BY|{player}|{}", clean(reason)),
         Msg::Refuse { reason } => format!("NO|{}", clean(reason)),
+        Msg::Ping { seq } => format!("PI|{seq}"),
+        Msg::Pong { seq } => format!("PO|{seq}"),
     }
 }
 
@@ -164,6 +169,14 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             want(2)?;
             Ok(Msg::Refuse { reason: text(1)? })
         }
+        "PI" => {
+            want(2)?;
+            Ok(Msg::Ping { seq: uint(1)? })
+        }
+        "PO" => {
+            want(2)?;
+            Ok(Msg::Pong { seq: uint(1)? })
+        }
         _ => Err(bad()),
     }
 }
@@ -231,6 +244,8 @@ mod tests {
         roundtrip(Msg::Refuse {
             reason: "different game file".into(),
         });
+        roundtrip(Msg::Ping { seq: 4 });
+        roundtrip(Msg::Pong { seq: 4 });
     }
 
     #[test]

@@ -40,8 +40,8 @@ pub fn build_id() -> String {
 pub struct SessionOpts {
     pub role: Role,
     pub name: String,
-    /// Input delay in frames (host only; the friend uses the host's).
-    pub delay: u32,
+    /// Input delay in frames (host only; the friend uses the host's); None picks it from the ping.
+    pub delay: Option<u32>,
     pub swf: PathBuf,
     /// Ruffle's save folder: the host shares its saves for this game.
     pub save_dir: Option<PathBuf>,
@@ -292,6 +292,52 @@ impl Timing {
     }
 }
 
+/// Pings the host sends before the start; the worst round trip picks the input delay.
+const PINGS: u32 = 5;
+/// Room for jitter on top of the worst ping.
+const JITTER_ROOM: Duration = Duration::from_millis(15);
+/// The delay when no ping answer comes back.
+const FALLBACK_DELAY: u32 = 3;
+
+/// The smallest input delay that runs clean at this ping: a delay of d frames has 2d frames
+/// minus the ping to spare (measured with tools/coop-lab/lab.py through a laggy relay: delay 1
+/// stalled at 60-70 ms, delay 2 at 140-150 ms, delay 3 ran clean at 160-170 ms).
+fn auto_delay(worst_ping: Duration, frame: Duration) -> u32 {
+    let frames = (worst_ping + JITTER_ROOM).as_secs_f64() / (2.0 * frame.as_secs_f64());
+    (frames.ceil() as u32).clamp(1, 10)
+}
+
+/// The game's frame time, from the SWF header.
+fn swf_frame_time(path: &Path) -> Result<Duration> {
+    let swf = ruffle_core::swf::decompress_swf(std::fs::File::open(path)?)?;
+    let rate = swf.header.frame_rate().to_f64();
+    if rate <= 0.0 {
+        bail!("the game file has no frame rate");
+    }
+    Ok(Duration::from_secs_f64(1.0 / rate))
+}
+
+/// Host: the worst round trip to `friend` over a few pings, None if it doesn't answer.
+fn measure_ping(link: &Link, friend: u8) -> Option<Duration> {
+    let mut worst = Duration::ZERO;
+    for seq in 0..PINGS {
+        let sent = Instant::now();
+        link.send(&Msg::Ping { seq });
+        loop {
+            let left = Duration::from_secs(2).checked_sub(sent.elapsed())?;
+            match next_event(link, left) {
+                Some(Event::Msg { from, msg: Msg::Pong { seq: s } }) if from == friend && s == seq => {
+                    worst = worst.max(sent.elapsed());
+                    break;
+                }
+                Some(_) => {}
+                None => return None,
+            }
+        }
+    }
+    Some(worst)
+}
+
 fn hash_file(path: &Path) -> Result<String> {
     let data = std::fs::read(path).map_err(|e| anyhow!("can't read {}: {e}", path.display()))?;
     Ok(format!("{:x}", Sha256::digest(data)))
@@ -383,19 +429,37 @@ impl Session {
                             ),
                             None => vec![],
                         };
+                        // the game starts: only this friend stays connected, and nobody new
+                        link.keep_only(&[from]);
+                        link.stop_accepting();
+                        let delay = match opts.delay {
+                            Some(delay) => delay,
+                            None => match (measure_ping(&link, from), swf_frame_time(&opts.swf)) {
+                                (Some(ping), Ok(frame)) => {
+                                    let delay = auto_delay(ping, frame);
+                                    tracing::info!(
+                                        "Ruffle Together: ping {} ms, input delay {delay} frames",
+                                        ping.as_millis()
+                                    );
+                                    delay
+                                }
+                                _ => {
+                                    tracing::warn!("Ruffle Together: no ping answer, input delay {FALLBACK_DELAY} frames");
+                                    FALLBACK_DELAY
+                                }
+                            },
+                        };
                         let start = Msg::Start {
                             player_count: PLAYERS,
                             // the friend's player slot (not its connection number: a refused
                             // or stray connection must not shift it)
                             your_index: 1,
-                            delay: opts.delay,
+                            // a frame's own input is read one frame ahead at the latest
+                            delay: delay.max(1),
                             start_unix_ms: now_unix_ms(),
                             frame_rate_milli: 0,
                             save,
                         };
-                        // the game starts: only this friend stays connected, and nobody new
-                        link.keep_only(&[from]);
-                        link.stop_accepting();
                         link.send(&me);
                         link.send(&start);
                         break (start, vec![opts.name.clone(), name], from);
@@ -419,6 +483,7 @@ impl Session {
                         }
                         host_name = name;
                     }
+                    Some(Event::Msg { msg: Msg::Ping { seq }, .. }) => link.send(&Msg::Pong { seq }),
                     Some(Event::Msg { msg: start @ Msg::Start { .. }, .. }) => {
                         break (start, vec![host_name, opts.name.clone()], 0);
                     }
@@ -581,19 +646,20 @@ impl Session {
             if self.paced && now < due {
                 break;
             }
-            // this PC's input for `delay` frames ahead
-            while self.local_sent <= self.lockstep.frame() {
-                let input = self.local_input();
-                let (frame, input) = self.lockstep.push_local(input);
-                self.taken_at.insert(frame, now);
-                self.link.send(&Msg::Input { player: self.local_index, frame, input });
-                self.local_sent += 1;
-            }
             let Some(inputs) = self.lockstep.ready() else {
                 self.timing.waiting(now, true);
                 break;
             };
             self.timing.waiting(now, false);
+            // this PC's input for `delay` frames ahead, read as this frame runs (not before
+            // waiting for it, which added the wait to this player's delay)
+            while self.local_sent <= self.lockstep.frame() {
+                let input = self.local_input();
+                let (frame, input) = self.lockstep.push_local(input);
+                self.taken_at.insert(frame, Instant::now());
+                self.link.send(&Msg::Input { player: self.local_index, frame, input });
+                self.local_sent += 1;
+            }
             let step_started = Instant::now();
             self.stepper.step(player, &inputs);
             self.timing.step(step_started, step_started.elapsed(), frame_time);
@@ -818,7 +884,7 @@ mod tests {
         SessionOpts {
             role,
             name: "tester".into(),
-            delay: 3,
+            delay: Some(3),
             swf: swf.to_path_buf(),
             save_dir: None,
             script: Some(script()),
@@ -897,6 +963,91 @@ mod tests {
         // the same game on both PCs, checked every 25 frames (frames 24, 49, ... 974 are check frames)
         assert_eq!(host_session.print_at(974), join_session.print_at(974));
         assert!(host_session.print_at(974).is_some());
+    }
+
+    /// Measured in the lab (tools/coop-lab/lab.py, relay with lag): a delay of d frames runs
+    /// clean while the ping stays under 2d frames minus ~15 ms of jitter room.
+    #[test]
+    fn delay_is_picked_from_the_ping() {
+        let frame = Duration::from_secs_f64(1.0 / 30.0);
+        let ms = Duration::from_millis;
+        assert_eq!(auto_delay(ms(1), frame), 1, "same PC or LAN");
+        assert_eq!(auto_delay(ms(10), frame), 1, "Radmin");
+        assert_eq!(auto_delay(ms(50), frame), 1);
+        assert_eq!(auto_delay(ms(60), frame), 2, "delay 1 stalled at 60-70 ms");
+        assert_eq!(auto_delay(ms(100), frame), 2, "delay 2 ran clean at 100-110 ms");
+        assert_eq!(auto_delay(ms(155), frame), 3, "the central server from here");
+        assert_eq!(auto_delay(ms(5000), frame), 10, "at most 10 frames");
+    }
+
+    /// Without a set delay the host pings the friend; on one PC that picks 1 frame for both.
+    #[test]
+    fn host_picks_the_delay_from_the_ping() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let auto = |mut o: SessionOpts| {
+            o.paced = true;
+            o.delay = None;
+            o
+        };
+        let host = thread::spawn(move || play(auto(opts(Role::HostDirect { port }, &host_swf, 0)), 90, None));
+        thread::sleep(Duration::from_millis(300));
+        let addr = format!("127.0.0.1:{port}");
+        let (_, friend) = play(auto(opts(Role::JoinDirect { addr }, &swf, 0)), 90, None);
+        let (host_state, host) = host.join().expect("host");
+        assert_eq!(host_state.desync_at, None);
+        let frame_ms = 1000.0 / 30.0;
+        for (who, session) in [("host", &host), ("friend", &friend)] {
+            let mut felt: Vec<f64> =
+                session.felt_delay()[30..].iter().map(|d| d.as_secs_f64() * 1000.0).collect();
+            felt.sort_by(f64::total_cmp);
+            let median = felt[felt.len() / 2];
+            assert!(median < frame_ms + 12.0, "{who} felt {median:.0} ms, expected 1 frame");
+        }
+    }
+
+    /// The PC that started first waits for the other's inputs; reading its own keys only while
+    /// it waited added that wait to its delay (host 94 ms at 2 frames). Both feel the setting.
+    #[test]
+    fn both_players_feel_the_input_delay_setting() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let two_frames = |mut o: SessionOpts| {
+            o.paced = true;
+            o.delay = Some(2);
+            o
+        };
+        let host = thread::spawn(move || {
+            play(two_frames(opts(Role::HostDirect { port }, &host_swf, 0)), 150, None)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let addr = format!("127.0.0.1:{port}");
+            // the friend's game starts later (in real use: a slower load), so the host is ahead
+            let opts = two_frames(opts(Role::JoinDirect { addr }, &swf, 0));
+            let mut session = Session::start(opts).expect("session");
+            let player = headless_player(&swf, Some(session.clock()), session.take_storage())
+                .expect("player");
+            let mut player = player.lock().expect("player");
+            thread::sleep(Duration::from_millis(200));
+            while session.frame() < 150 && session.tick(&mut player).closed.is_none() {
+                thread::sleep(Duration::from_millis(1));
+            }
+            session
+        });
+        let (_, host) = host.join().expect("host");
+        let friend = join.join().expect("join");
+        let frame_ms = 1000.0 / 30.0;
+        for (who, session) in [("host", &host), ("friend", &friend)] {
+            // after start-up
+            let mut felt: Vec<f64> =
+                session.felt_delay()[30..].iter().map(|d| d.as_secs_f64() * 1000.0).collect();
+            felt.sort_by(f64::total_cmp);
+            let median = felt[felt.len() / 2];
+            assert!(median < 2.0 * frame_ms + 12.0, "{who} felt {median:.0} ms at 2 frames");
+        }
     }
 
     #[test]

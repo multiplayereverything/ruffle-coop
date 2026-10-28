@@ -90,3 +90,15 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   fixes: quiet PASS x3 of 4 (one run had a single ~500 ms stall in both windows at once, unexplained), pressure
   PASS. Input delay in the lab ~101 ms (3 frames). lab.py relay at 5 ms + 5 ms jitter (Radmin-like), 900 frames:
   delay 3 host 122 / friend 101 ms median; delay 2 67 / 67; delay 1 34 / 59 (friend waits). Desktop tests 89/89.
+- Input delay (user chose: host measures the ping and picks the delay). Found first: the PC that runs ahead read
+  its keys when a frame was due, then waited for the other PC, adding the wait to its delay (direct, ~0 ping:
+  delay 1 host 67 / friend 34, delay 2 host 94 / friend 67). Test both_players_feel_the_input_delay_setting RED
+  (host 100 ms at 2 frames, friend started 200 ms late) -> keys are read as the frame runs -> GREEN; lab direct
+  and Radmin-like: delay 1 = 34/34, delay 2 = 67/67. Delay 0 is no longer allowed (host clamps to 1).
+  Ping/Pong messages: the host pings the friend 5 times after accepting it; delay = ceil((worst ping + 15 ms) /
+  2 frames), 1..10, fallback 3 if no answer; --coop-delay N still fixes it. Rule measured with lab.py relay lag:
+  delay 1 clean to ~50 ms ping, stalls at 60-70 (20.6-23.6 s for 20 s); delay 2 clean at 100-110, edge 120-130,
+  stalls 140-150 (22.4 s); delay 3 clean at 160-170. (A first rule, (d+1) frames, fit only the delay-1 data and
+  picked 5 frames on the live relay; corrected.) Auto picks: direct 1, 5 ms lag 1, 30 ms 2, 50 ms 2-3. Live relay
+  195.60.166.57:25569 (room ET5HD): ping 168 ms -> 3 frames, felt 100/100 ms, 450 frames in 15.1 s, in sync
+  (1.0.1: host 134 / friend 100). windows_lab both modes PASS, input delay 35 ms. Desktop tests 92/92.

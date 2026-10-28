@@ -4,7 +4,7 @@ Version 1.0.2 (build id `rc-1.0.2#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with a friend. Both PCs run the same game in this Ruffle build;
 only the key presses travel, and every frame runs on both PCs with both players' keys. Both players get
-the same small input delay (3 frames by default), and the two games are compared every 25 frames: if they
+the same small input delay (the host picks it from the ping: 1 frame on a LAN), and the two games are compared every 25 frames: if they
 ever differ, both windows say so ("THE TWO GAMES ARE OUT OF SYNC: restart the level").
 
 First game: Bad Ice-Cream (`BadIceCream_coop.swf`, made by the Bad Ice-Cream mod's `build.py --no-net`).
@@ -37,7 +37,8 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - Each player uses their own normal keys: arrows or WASD to move, Space, Enter or F to shoot. The host is
   player 1, the friend player 2.
 - Only the host's mouse works in the game (menus, level select).
-- `--coop-delay N` (host): input delay in frames. Raise it by one if the game keeps pausing on a slow connection.
+- `--coop-delay N` (host): a fixed input delay in frames. Without it the host pings the friend when they
+  connect and picks the smallest delay that runs smoothly (about 1 frame per 67 ms of ping).
 - The window title shows the room code, your player number, and "waiting for…", "… left" or "OUT OF SYNC".
 - Everyone plays with the host's save (unlocked levels); nobody's own save changes.
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
