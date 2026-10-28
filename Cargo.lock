@@ -4862,6 +4862,7 @@ dependencies = [
  "ruffle_render_wgpu",
  "ruffle_video_external",
  "ruffle_video_software",
+ "sha2",
  "sys-locale",
  "tempfile",
  "thiserror 2.0.18",

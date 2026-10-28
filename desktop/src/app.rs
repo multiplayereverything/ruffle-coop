@@ -48,6 +48,8 @@ struct MainWindow {
     loaded: LoadingState,
     time: Instant,
     next_frame_time: Option<Instant>,
+    /// Ruffle Together: the window title last shown for the session.
+    coop_title: String,
     event_loop_proxy: EventLoopProxy<RuffleEvent>,
 }
 
@@ -383,7 +385,20 @@ impl MainWindow {
         // Core loop
         // [NA] This used to be called `MainEventsCleared`, but I think the behaviour is different now.
         // We should look at changing our tick to happen somewhere else if we see any behavioural problems.
-        if matches!(self.loaded, LoadingState::Loaded) {
+        if matches!(self.loaded, LoadingState::Loaded)
+            && let Some(mut session) = crate::coop::session()
+        {
+            // Ruffle Together: frames run when every player's input is in, not by the clock
+            if let Some(mut player) = self.player.get() {
+                session.tick(&mut player);
+            }
+            let title = session.title();
+            if title != self.coop_title {
+                self.gui.window().set_title(&title);
+                self.coop_title = title;
+            }
+            self.next_frame_time = Some(Instant::now() + std::time::Duration::from_millis(2));
+        } else if matches!(self.loaded, LoadingState::Loaded) {
             let new_time = Instant::now();
             let dt = FloatDuration::from_std(new_time.duration_since(self.time));
             if dt.as_millis() > 0.0 {
@@ -402,11 +417,43 @@ impl MainWindow {
         // Apply any pending mouse moves, so that the movie sees the latest
         // position before e.g. a click.
         self.flush_mouse_move();
+        if crate::coop::session().is_some() {
+            return self.coop_input(event);
+        }
         let handled = self.player.handle_event(event);
 
         // Handling an event may have made the movie need rendering (on demand).
         self.render_movie_if_needed();
         handled
+    }
+
+    /// Ruffle Together: this PC's keys and mouse go to the session, which sends them to everyone
+    /// and presses them on every PC's game at the same frame. Nothing reaches the game directly.
+    fn coop_input(&mut self, event: PlayerEvent) -> bool {
+        let Some(mut session) = crate::coop::session() else {
+            return false;
+        };
+        match event {
+            PlayerEvent::KeyDown { key } => session.key(key.physical_key, true),
+            PlayerEvent::KeyUp { key } => session.key(key.physical_key, false),
+            PlayerEvent::FocusGained => session.focus(true),
+            PlayerEvent::FocusLost => session.focus(false),
+            PlayerEvent::MouseMove { x, y }
+            | PlayerEvent::MouseDown { x, y, .. }
+            | PlayerEvent::MouseUp { x, y, .. } => {
+                let down = match event {
+                    PlayerEvent::MouseDown { .. } => Some(true),
+                    PlayerEvent::MouseUp { .. } => Some(false),
+                    _ => None,
+                };
+                if let Some(mut player) = self.player.get() {
+                    let (x, y) = player.viewport_to_stage(x, y);
+                    session.mouse(x, y, down);
+                }
+            }
+            _ => {}
+        }
+        true
     }
 
     fn flush_mouse_move(&mut self) {
@@ -415,6 +462,10 @@ impl MainWindow {
         }
 
         let (x, y) = self.gui.window_to_movie_position(self.mouse_pos);
+        if crate::coop::session().is_some() {
+            self.coop_input(PlayerEvent::MouseMove { x, y });
+            return;
+        }
         self.player.handle_event(PlayerEvent::MouseMove { x, y });
         self.render_movie_if_needed();
     }
@@ -590,6 +641,7 @@ impl ApplicationHandler<RuffleEvent> for App {
                 modifiers: Modifiers::default(),
                 time: Instant::now(),
                 next_frame_time: None,
+                coop_title: String::new(),
                 event_loop_proxy,
             });
         }

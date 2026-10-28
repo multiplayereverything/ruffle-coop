@@ -966,6 +966,21 @@ impl Player {
         self.mutate_with_update_context(crate::coop_fingerprint::describe)
     }
 
+    /// Ruffle Together: a window position as stage twips, which mean the same spot on every PC
+    /// whatever its window size.
+    pub fn viewport_to_stage(&mut self, x: f64, y: f64) -> (i32, i32) {
+        let matrix = self.mutate_with_update_context(|context| context.stage.inverse_view_matrix());
+        let point = matrix * Point::from_pixels(x, y);
+        (point.x.get(), point.y.get())
+    }
+
+    /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).
+    pub fn stage_to_viewport(&mut self, x: i32, y: i32) -> (f64, f64) {
+        let matrix = self.mutate_with_update_context(|context| context.stage.view_matrix());
+        let point = matrix * Point::new(Twips::new(x), Twips::new(y));
+        (point.x.to_pixels(), point.y.to_pixels())
+    }
+
     /// Moves the frame clock by one frame; does nothing outside a session.
     pub fn advance_frame_clock(&mut self, frame: Duration) {
         if let Some(clock) = &self.frame_clock

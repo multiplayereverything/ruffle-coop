@@ -69,6 +69,7 @@ impl Script {
     }
 
     /// Number of scripted frames.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.frames.len()
     }

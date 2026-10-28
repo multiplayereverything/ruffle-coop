@@ -337,7 +337,19 @@ impl ActivePlayer {
             .with_player_runtime(opt.player.player_runtime.unwrap_or_default())
             .with_frame_rate(opt.player.frame_rate)
             .with_avm2_optimizer_enabled(opt.avm2_optimizer_enabled);
+        // Ruffle Together: the session's clock (getTimer, Date, Math.random seed) and save data
+        let coop_clock = crate::coop::session().map(|mut session| {
+            builder = std::mem::take(&mut builder)
+                .with_locale(ruffle_core::frame_clock::FrameClockLocale::new(session.clock()))
+                .with_storage(Box::new(session.take_storage()));
+            session.clock()
+        });
         let player = builder.build();
+        if let Some(clock) = coop_clock
+            && let Ok(mut player) = player.lock()
+        {
+            player.set_frame_clock(Some(clock));
+        }
 
         window.set_title(&format!("Ruffle - {readable_name}"));
 

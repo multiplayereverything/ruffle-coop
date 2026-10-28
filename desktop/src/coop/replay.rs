@@ -40,33 +40,13 @@ pub struct Replay<'a> {
 impl Replay<'_> {
     /// The game's fingerprint after every frame.
     pub fn run(&self) -> Result<Vec<u64>> {
-        let movie = movie_from_path(self.swf, None).map_err(|e| anyhow!("{e}"))?;
-        let (width, height) = (
-            movie.width().to_pixels().round() as u32,
-            movie.height().to_pixels().round() as u32,
-        );
         let clock = Arc::new(Mutex::new(FrameClock::new(self.start_unix_ms)));
-        let mut builder = PlayerBuilder::new()
-            .with_movie(movie)
-            .with_navigator(NullNavigatorBackend::new())
-            .with_storage(Box::new(SessionStorage::default()))
-            .with_viewport_dimensions(width, height, 1.0)
-            .with_autoplay(true);
-        builder = if self.frame_clock {
-            builder.with_locale(FrameClockLocale::new(clock.clone()))
-        } else {
-            builder.with_locale(DefaultLocaleBackend::new())
-        };
-        // always a real renderer, as in a session: games draw clips into bitmaps and change what
-        // is on stage when that works (Bad Ice-Cream's title screen does), so a renderer that
-        // can't draw takes a different path
-        builder = builder.with_renderer(offscreen_renderer(width, height)?);
-        let player = builder.build();
+        let player = headless_player(
+            self.swf,
+            self.frame_clock.then_some(clock),
+            SessionStorage::default(),
+        )?;
         let mut player = player.lock().map_err(|_| anyhow!("player lock"))?;
-        if self.frame_clock {
-            player.set_frame_clock(Some(clock));
-        }
-        while !player.preload(&mut ExecutionLimit::none()) {}
 
         let mut stepper = Stepper::new(GameKeys::bad_ice_cream());
         let mut rng = rand::rng();
@@ -93,6 +73,41 @@ impl Replay<'_> {
         }
         Ok(prints)
     }
+}
+
+/// A windowless player for `swf`, loaded and ready for its first frame. With a frame clock it
+/// runs as in a session (getTimer, Date and Math.random follow the clock); without, as upstream.
+pub fn headless_player(
+    swf: &Path,
+    clock: Option<Arc<Mutex<FrameClock>>>,
+    storage: SessionStorage,
+) -> Result<Arc<Mutex<Player>>> {
+    let movie = movie_from_path(swf, None).map_err(|e| anyhow!("{e}"))?;
+    let (width, height) = (
+        movie.width().to_pixels().round() as u32,
+        movie.height().to_pixels().round() as u32,
+    );
+    let mut builder = PlayerBuilder::new()
+        .with_movie(movie)
+        .with_navigator(NullNavigatorBackend::new())
+        .with_storage(Box::new(storage))
+        .with_viewport_dimensions(width, height, 1.0)
+        .with_autoplay(true)
+        // always a real renderer, as in a session: games draw clips into bitmaps and change
+        // what is on stage when that works (Bad Ice-Cream's title screen does), so a renderer
+        // that can't draw takes a different path
+        .with_renderer(offscreen_renderer(width, height)?);
+    builder = match &clock {
+        Some(clock) => builder.with_locale(FrameClockLocale::new(clock.clone())),
+        None => builder.with_locale(DefaultLocaleBackend::new()),
+    };
+    let player = builder.build();
+    {
+        let mut locked = player.lock().map_err(|_| anyhow!("player lock"))?;
+        locked.set_frame_clock(clock);
+        while !locked.preload(&mut ExecutionLimit::none()) {}
+    }
+    Ok(player)
 }
 
 fn offscreen_renderer(width: u32, height: u32) -> Result<WgpuRenderBackend<TextureTarget>> {

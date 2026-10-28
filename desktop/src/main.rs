@@ -200,6 +200,36 @@ fn main() -> Result<(), Error> {
 
     subscriber.init();
 
+    // Ruffle Together: connect and agree on the game before the window opens
+    if let Some(role) = preferences.cli.coop.role()? {
+        let coop = &preferences.cli.coop;
+        let swf = preferences
+            .cli
+            .movie_url
+            .as_ref()
+            .and_then(|url| url.to_file_path().ok())
+            .context("Ruffle Together needs the game file (a local SWF path)")?;
+        let script = match &coop.coop_script {
+            Some(path) => Some(
+                coop::script::Script::parse(&std::fs::read_to_string(path)?)
+                    .map_err(|e| anyhow::anyhow!(e))?,
+            ),
+            None => None,
+        };
+        let session = coop::session::Session::start(coop::session::SessionOpts {
+            role,
+            name: coop.coop_name.clone(),
+            delay: coop.coop_delay,
+            swf,
+            save_dir: Some(preferences.cli.save_directory.clone()),
+            script,
+            host_wait: None,
+            start_skew_ms: 0,
+            paced: true,
+        })?;
+        coop::set_session(session);
+    }
+
     let result = App::new(preferences).and_then(|(mut app, event_loop)| {
         event_loop.run_app(&mut app).context("Event loop failure")
     });

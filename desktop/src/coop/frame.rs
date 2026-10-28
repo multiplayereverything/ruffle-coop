@@ -30,7 +30,8 @@ impl Stepper {
         if mouse != self.mouse
             && let Some((x, y, down)) = mouse
         {
-            let (x, y) = (f64::from(x) / 20.0, f64::from(y) / 20.0);
+            // inputs carry stage positions; each PC turns them into its own window's position
+            let (x, y) = player.stage_to_viewport(x, y);
             player.handle_event(PlayerEvent::MouseMove { x, y });
             let was_down = self.mouse.is_some_and(|(_, _, down)| down);
             let button = MouseButton::Left;
