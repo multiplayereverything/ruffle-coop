@@ -43,3 +43,4 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   direct, 75 s: both windows identical fingerprints at frames 24, 774, 1524, no warnings. Live relay
   195.60.166.57:25569 with room code Z9ELK, 60 s: identical at 24, 774, 1524.
 - mods-info: ruffle-coop pushed (025f6f5, user OK); the live relay accepted it 9 minutes later.
+- Release v1.0.0 published (user asked): tag v1.0.0 on 0b9247d, asset RuffleTogether-1.0.0-windows-x64.zip (ruffle_desktop.exe, README.md, LICENSE.md), SHA-256 F1886A7E...6590, re-downloaded and hash checked. Build id rc-1.0.0#0b9247df45. Not a prerelease. mods-info ruffle-coop still says 0.7.1 (update needs the user's OK).
