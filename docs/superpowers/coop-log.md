@@ -148,3 +148,7 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   path ping 328 ms -> 7 frames (all 4 on this PC). mods-info decbe2b: ruffle-coop 1.0.3, game names both games.
   Asked the launcher session to switch GM2 to Ruffle Together (online id ruffle-coop, --coop-keys gun-mayhem-2,
   host --coop-players picker, no FlashVars/--tcp-connections, drop the dist fallback, guide without F9).
+- Launcher 1.0.34 (launcher session, verified latest + launcher.json): GM2 online id ruffle-coop; Play online host
+  --coop-players 2, "Host a room for 3/4 players" and direct host 2/3/4 under Other ways; joins with --coop-keys
+  gun-mayhem-2; no FlashVars/--tcp-connections; swf only GAMES_DIR. Its test: --launch gunmayhem2:host4 gave the
+  expected command line. Not played in a match there; not tried on two PCs.
