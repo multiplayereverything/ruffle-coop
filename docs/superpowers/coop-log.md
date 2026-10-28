@@ -102,3 +102,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   picked 5 frames on the live relay; corrected.) Auto picks: direct 1, 5 ms lag 1, 30 ms 2, 50 ms 2-3. Live relay
   195.60.166.57:25569 (room ET5HD): ping 168 ms -> 3 frames, felt 100/100 ms, 450 frames in 15.1 s, in sync
   (1.0.1: host 134 / friend 100). windows_lab both modes PASS, input delay 35 ms. Desktop tests 92/92.
+- Release v1.0.2 (user asked for the best build to test with friends; earlier OK to publish 1.0.2): commit
+  bf48ad2, tag v1.0.2, RuffleTogether-1.0.2-windows-x64.zip SHA-256 142190dd...755a, latest; re-downloaded, hash
+  matches. mods-info c392a26: ruffle-coop latest/min 1.0.2, protocol rc-1.0.2. Launcher 1.0.33+ updates on open.
