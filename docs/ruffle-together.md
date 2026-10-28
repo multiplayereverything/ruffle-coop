@@ -47,6 +47,8 @@ The relay needs the `ruffle-coop` game in mods-info first.
   During the game the window title shows the room code, your player number, and "waiting for…", "… left" or
   "OUT OF SYNC".
 - Everyone plays with the host's save (unlocked levels); nobody's own save changes.
+- One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
+  window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
   frame rate, time per frame, and how long the game waited for the other PC's keys.
 

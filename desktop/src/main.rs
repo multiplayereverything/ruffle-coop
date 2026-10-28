@@ -200,6 +200,12 @@ fn main() -> Result<(), Error> {
 
     subscriber.init();
 
+    // one Ruffle window at a time: opening another game closes the one still open (before a
+    // session starts, so a direct host's port is free again)
+    if !preferences.cli.coop.coop_headless {
+        close_previous_window(&preferences.cli.cache_directory);
+    }
+
     // Ruffle Together: connect and agree on the game before the window opens
     if let Some(role) = preferences.cli.coop.role()? {
         let coop = &preferences.cli.coop;
@@ -284,6 +290,43 @@ fn main() -> Result<(), Error> {
     }
 
     result
+}
+
+/// Closes the Ruffle window this cache directory last started, if it is still open, and records
+/// this one. Labs give each window its own cache directory, so they can run several.
+fn close_previous_window(cache_directory: &std::path::Path) {
+    let pid_file = cache_directory.join("window.pid");
+    #[cfg(windows)]
+    if let Ok(text) = std::fs::read_to_string(&pid_file)
+        && let Ok(pid) = text.trim().parse::<u32>()
+        && pid != std::process::id()
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let run = |program: &str, args: &[&str]| {
+            std::process::Command::new(program)
+                .args(args)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).to_lowercase())
+                .unwrap_or_default()
+        };
+        let filter = format!("PID eq {pid}");
+        let is_ruffle = || run("tasklist", &["/FI", &filter, "/NH"]).contains("ruffle_desktop");
+        // process numbers are reused: only a Ruffle process is closed
+        if is_ruffle() {
+            tracing::info!("Closing the Ruffle window that was already open (process {pid})");
+            run("taskkill", &["/PID", &pid.to_string(), "/F"]);
+            for _ in 0..40 {
+                if !is_ruffle() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+    let _ = std::fs::create_dir_all(cache_directory);
+    let _ = std::fs::write(&pid_file, std::process::id().to_string());
 }
 
 /// Move logs from config directory into proper log directory.

@@ -178,3 +178,9 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   SHA-256 8ebf601e...491f, latest, re-downloaded hash matches. Live with the downloaded exe: windowed host showed
   room USST9 + "Waiting for players: 1 of 2"; a friend joined by code, both started (4 frames, 162 ms ping), host
   window switched to the game.
+- One window at a time (user: "close ruffle if they trying to open another one"): main.rs close_previous_window
+  before the session starts (so a direct host's port is free): reads <cache>/window.pid, closes that process only if
+  tasklist shows it is ruffle_desktop (pids are reused), waits up to 2 s, writes its own pid. Applies to every
+  windowed start (sessions and plain Ruffle); headless skipped; labs use their own --cache-directory. Checked: A
+  hosting port 7846 then B in the same cache folder -> A closed (log line), B hosted 7846 with no error; C in another
+  folder stayed open. Tests 98/98, windows_lab quiet PASS. Not released.
