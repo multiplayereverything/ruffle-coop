@@ -139,6 +139,8 @@ struct Timing {
     last_tick: Option<Instant>,
     ticks: u32,
     frames: u32,
+    /// Times the window put a picture on screen.
+    shown: u32,
     longest_tick_gap: Duration,
     step_total: Duration,
     step_longest: Duration,
@@ -157,6 +159,7 @@ impl Timing {
             last_tick: None,
             ticks: 0,
             frames: 0,
+            shown: 0,
             longest_tick_gap: Duration::ZERO,
             step_total: Duration::ZERO,
             step_longest: Duration::ZERO,
@@ -204,10 +207,11 @@ impl Timing {
         }
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         let line = format!(
-            "Ruffle Together timing: {:.1} fps (game {:.0}), {} ticks, longest tick gap {:.0} ms, \
+            "Ruffle Together timing: {:.1} fps (game {:.0}), {:.1} shown per second, {} ticks, longest tick gap {:.0} ms, \
              frame cost avg {:.1} / max {:.0} ms, waited for input {:.0} ms of {:.0} (longest {:.0} ms)",
             self.frames as f64 / span.as_secs_f64(),
             frame_rate,
+            self.shown as f64 / span.as_secs_f64(),
             self.ticks,
             ms(self.longest_tick_gap),
             ms(self.step_total) / self.frames.max(1) as f64,
@@ -627,6 +631,11 @@ impl Session {
     }
 
     /// How long this PC's inputs took to reach the game (input taken -> its frame runs).
+    /// The window drew a picture (for the timing line).
+    pub fn shown(&mut self) {
+        self.timing.shown += 1;
+    }
+
     pub fn felt_delay(&self) -> &[Duration] {
         &self.felt_delay
     }

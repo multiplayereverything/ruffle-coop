@@ -61,6 +61,9 @@ impl MainWindow {
             // refuses to reconfigure it to a zero size.
             if !self.minimized && !self.occluded {
                 self.gui.render(self.player.get());
+                if let Some(mut session) = crate::coop::session() {
+                    session.shown();
+                }
             }
 
             // Important that we return here, or we'll get a feedback loop with egui
@@ -390,7 +393,13 @@ impl MainWindow {
         {
             // Ruffle Together: frames run when every player's input is in, not by the clock
             if let Some(mut player) = self.player.get() {
+                let before = session.frames_run();
                 session.tick(&mut player);
+                // the step already drew the frame (clearing needs_render), so the window has to
+                // be told to show it
+                if session.frames_run() != before {
+                    self.gui.window().request_redraw();
+                }
             }
             let title = session.title();
             if title != self.coop_title {

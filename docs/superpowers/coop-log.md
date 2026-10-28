@@ -70,3 +70,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   waited for the friend's input 100% of the time (longest 37-52 ms, 393 ms at start). The host runs each frame
   as soon as the friend's input arrives, so its picture follows the friend's PC and the network. Friend's log not
   yet received.
+- ROOT CAUSE of the two-PC lag (both logs: game logic a steady 30.0 fps on both PCs, in sync, frame cost 1-12 ms,
+  friend never waited, host waits <= ~50 ms): the picture, not the game. Stepper draws each frame (player.render),
+  which clears needs_render, so about_to_wait's render_movie_if_needed never asked the window to repaint; the screen
+  only updated when a key, mouse move or egui forced a repaint. Measured with a new "shown per second" count in the
+  timing line: two windows 30.0 game fps, 0.0 shown per second. Fix (app.rs): request_redraw whenever the session
+  ran a frame. After: 30.0 shown per second in both windows for 55 s, same fingerprints at 24/774/1524;
+  desktop tests 88/88. Not fixed (minor at 10 ms ping): the host always waits on the friend's input because the
+  friend starts later; the host's picture follows packet arrival.
