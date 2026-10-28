@@ -37,3 +37,9 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   lab 900 frames both modes in sync (felt delay ~101 ms direct, 101-113 ms through a laggy relay).
 - Known limits for v1: Bad Ice-Cream keys only (P pause, M mute and Esc never reach the game), window title
   is the only status display, the windowed session hasn't been run by hand or on two real PCs yet.
+- First real windowed test (two ruffle_desktop windows on this PC, scripted keys): frames never started, the
+  session's no-loads navigator also blocked the game file itself (the windowless tests load it differently).
+  Fixed with SessionNavigator (only the first fetch goes through; test only_the_game_file_loads...). Then:
+  direct, 75 s: both windows identical fingerprints at frames 24, 774, 1524, no warnings. Live relay
+  195.60.166.57:25569 with room code Z9ELK, 60 s: identical at 24, 774, 1524.
+- mods-info: ruffle-coop pushed (025f6f5, user OK); the live relay accepted it 9 minutes later.
