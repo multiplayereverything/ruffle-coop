@@ -9,6 +9,7 @@
 mod app;
 mod backends;
 mod cli;
+mod coop;
 mod custom_event;
 mod dbus;
 mod gui;

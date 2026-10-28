@@ -1,0 +1,185 @@
+//! Which frame may run next: a frame runs only once every player's input for it is in.
+
+use std::collections::BTreeMap;
+
+pub const UP: u16 = 1;
+pub const DOWN: u16 = 2;
+pub const LEFT: u16 = 4;
+pub const RIGHT: u16 = 8;
+pub const FIRE: u16 = 16;
+pub const ALT: u16 = 32;
+
+/// Up to 4 players (v1 plays 2).
+pub const MAX_PLAYERS: usize = 4;
+
+/// One player's input for one frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct InputFrame {
+    /// UP, DOWN, LEFT, RIGHT, FIRE, ALT bits.
+    pub buttons: u16,
+    /// Host only: mouse position in stage twips and whether the button is down.
+    pub mouse: Option<(i32, i32, bool)>,
+}
+
+pub struct Lockstep {
+    player_count: u8,
+    local_index: u8,
+    /// The next frame to run.
+    frame: u32,
+    /// The frame the next local input is for (current frame + delay).
+    next_local: u32,
+    inputs: BTreeMap<u32, [Option<InputFrame>; MAX_PLAYERS]>,
+}
+
+impl Lockstep {
+    /// Frames `0..delay` start with empty input for everyone, so the game starts at once.
+    pub fn new(player_count: u8, local_index: u8, delay: u32) -> Self {
+        assert!((1..=MAX_PLAYERS as u8).contains(&player_count) && local_index < player_count);
+        let mut inputs = BTreeMap::new();
+        for frame in 0..delay {
+            let mut row = [None; MAX_PLAYERS];
+            for slot in row.iter_mut().take(player_count as usize) {
+                *slot = Some(InputFrame::default());
+            }
+            inputs.insert(frame, row);
+        }
+        Self {
+            player_count,
+            local_index,
+            frame: 0,
+            next_local: delay,
+            inputs,
+        }
+    }
+
+    /// Stores this PC's input for the frame `delay` frames ahead; returns that frame, to send.
+    pub fn push_local(&mut self, input: InputFrame) -> (u32, InputFrame) {
+        let frame = self.next_local;
+        self.next_local += 1;
+        self.push_remote(self.local_index, frame, input);
+        (frame, input)
+    }
+
+    /// Stores another player's input. Inputs for frames already run, and repeats, are ignored.
+    pub fn push_remote(&mut self, player: u8, frame: u32, input: InputFrame) {
+        if player >= self.player_count || frame < self.frame {
+            return;
+        }
+        let slot = &mut self.inputs.entry(frame).or_insert([None; MAX_PLAYERS])[player as usize];
+        if slot.is_none() {
+            *slot = Some(input);
+        }
+    }
+
+    /// Every player's input for the next frame (by player index), once all are in.
+    pub fn ready(&self) -> Option<Vec<InputFrame>> {
+        let row = self.inputs.get(&self.frame)?;
+        row[..self.player_count as usize].iter().copied().collect()
+    }
+
+    /// Call after running the frame `ready()` returned.
+    pub fn advance(&mut self) {
+        self.inputs.remove(&self.frame);
+        self.frame += 1;
+    }
+
+    pub fn frame(&self) -> u32 {
+        self.frame
+    }
+
+    /// Players whose input for the next frame hasn't arrived.
+    pub fn waiting_on(&self) -> Vec<u8> {
+        let row = self.inputs.get(&self.frame);
+        (0..self.player_count)
+            .filter(|&p| row.is_none_or(|row| row[p as usize].is_none()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(buttons: u16) -> InputFrame {
+        InputFrame {
+            buttons,
+            mouse: None,
+        }
+    }
+
+    #[test]
+    fn waits_for_all_players() {
+        let mut ls = Lockstep::new(2, 0, 1);
+        // frame 0 is prefilled for everyone
+        assert!(ls.ready().is_some());
+        ls.advance();
+        ls.push_local(key(UP));
+        assert!(ls.ready().is_none());
+        ls.push_remote(1, 1, key(DOWN));
+        assert_eq!(ls.ready(), Some(vec![key(UP), key(DOWN)]));
+    }
+
+    #[test]
+    fn delay_tags_future_frame() {
+        let mut ls = Lockstep::new(2, 0, 3);
+        let (frame, input) = ls.push_local(key(FIRE));
+        assert_eq!(frame, 3);
+        assert_eq!(input, key(FIRE));
+    }
+
+    #[test]
+    fn four_players() {
+        let mut ls = Lockstep::new(4, 2, 0);
+        ls.push_local(key(LEFT));
+        ls.push_remote(0, 0, key(0));
+        ls.push_remote(1, 0, key(0));
+        assert!(ls.ready().is_none());
+        ls.push_remote(3, 0, key(RIGHT));
+        assert_eq!(ls.ready(), Some(vec![key(0), key(0), key(LEFT), key(RIGHT)]));
+    }
+
+    #[test]
+    fn burst_catch_up() {
+        let mut ls = Lockstep::new(2, 0, 3);
+        for _ in 0..8 {
+            ls.push_local(key(0));
+        }
+        // nothing from the friend yet: only the 3 prefilled frames can run
+        let mut ran = 0;
+        while ls.ready().is_some() {
+            ls.advance();
+            ran += 1;
+        }
+        assert_eq!(ran, 3);
+        // the friend's inputs for frames 3..=10 arrive at once
+        for frame in 3..=10 {
+            ls.push_remote(1, frame, key(UP));
+        }
+        while ls.ready().is_some() {
+            ls.advance();
+            ran += 1;
+        }
+        assert_eq!(ran, 11);
+        assert_eq!(ls.frame(), 11);
+    }
+
+    #[test]
+    fn waiting_on_names_missing() {
+        let mut ls = Lockstep::new(3, 0, 0);
+        ls.push_local(key(0));
+        ls.push_remote(2, 0, key(0));
+        assert_eq!(ls.waiting_on(), vec![1]);
+    }
+
+    #[test]
+    fn old_and_duplicate_inputs_are_ignored() {
+        let mut ls = Lockstep::new(2, 0, 0);
+        ls.push_local(key(0));
+        ls.push_remote(1, 0, key(UP));
+        ls.push_remote(1, 0, key(DOWN)); // a duplicate must not replace the first
+        assert_eq!(ls.ready(), Some(vec![key(0), key(UP)]));
+        ls.advance();
+        ls.push_remote(1, 0, key(LEFT)); // already played: dropped
+        assert_eq!(ls.waiting_on(), vec![0, 1]);
+    }
+}
