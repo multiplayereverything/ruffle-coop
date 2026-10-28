@@ -53,3 +53,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   picture follows packet arrival (freeze, then several frames at once). Nagle is off on every socket (checked).
   Not yet known: what the user's LAN does (Wi-Fi?). Test build with the timing line: test-build/ (not committed),
   sha256 cac226fd...cbb9; asked the user for both PCs' ruffle.log and a ping.
+- Release v1.0.1 (user chose "Release v1.0.1" to get the timing build into the launcher): commit d125698 (version
+  1.0.1, timing line, docs), desktop tests 88/88 with COOP_TEST_SWF, lab direct 450 frames in sync. Tag v1.0.1, asset
+  RuffleTogether-1.0.1-windows-x64.zip SHA-256 4285b186...3c7d (exe 6b280c71...9b75), marked latest; releases/latest
+  returns it, re-downloaded and hash checked. Live relay 195.60.166.57:25569 with the downloaded exe, room V49FG, 300
+  frames: in sync, felt delay host 134 / friend 100 ms (the round-trip asymmetry again). mods-info 1a33560:
+  ruffle-coop latest/min 1.0.1, protocol rc-1.0.1 (pushed from a fresh clone; the global-mods-server/mods-info clone
+  has other sessions' uncommitted work and was left alone). Asked the Multiplayer Mods Launcher session to update
+  installs that already have 1.0.0 (its installer only fetches when ruffle_desktop.exe is missing).
