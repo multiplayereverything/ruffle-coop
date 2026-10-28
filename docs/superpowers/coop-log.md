@@ -138,3 +138,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   sync, 94.3-94.6 s. windows_lab limits now follow the game's own rate (GM2 35 fps read as a failure at 30's
   limits) and print late frames per 5 s on failure. GM2 windows: pressure 35/35, 1 late; quiet 1st run 4 late +
   34.4 fps min (not repeated), then 2 runs PASS (2-3 late = menu/map loads).
+  Stable GM2 test copy (no build touches it): ai-work-flash-games/gm2-mod/ruffle-together/gunmayhem2_online.swf
+  (sha 080b5f9b...) + ruffle-together-4p.txt. dist/gunmayhem2_online.swf can be the old relay build (build.py
+  without --coop).
