@@ -6,6 +6,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+/// A save's name without the folder the game file is in ("localhost/<folder>/game.swf/so"
+/// becomes "game.swf/so"), so a friend who keeps the game somewhere else finds the host's save.
+fn key(name: &str) -> String {
+    let parts: Vec<&str> = name.split('/').collect();
+    match parts.iter().rposition(|part| part.to_ascii_lowercase().ends_with(".swf")) {
+        Some(at) => parts[at..].join("/"),
+        None => name.to_string(),
+    }
+}
+
 #[derive(Default)]
 pub struct SessionStorage {
     data: BTreeMap<String, Vec<u8>>,
@@ -25,7 +35,7 @@ impl SessionStorage {
         while !rest.is_empty() {
             let name = String::from_utf8(take(&mut rest)?.to_vec()).ok()?;
             let value = take(&mut rest)?.to_vec();
-            data.insert(name, value);
+            data.insert(key(&name), value);
         }
         Some(Self { data })
     }
@@ -60,7 +70,7 @@ impl SessionStorage {
                     if name.split('/').any(|part| part == swf)
                         && let Ok(value) = fs::read(&path)
                     {
-                        out.data.insert(name, value);
+                        out.data.insert(key(&name), value);
                     }
                 }
             }
@@ -73,16 +83,16 @@ impl SessionStorage {
 
 impl StorageBackend for SessionStorage {
     fn get(&self, name: &str) -> Option<Vec<u8>> {
-        self.data.get(name).cloned()
+        self.data.get(&key(name)).cloned()
     }
 
     fn put(&mut self, name: &str, value: &[u8]) -> bool {
-        self.data.insert(name.to_string(), value.to_vec());
+        self.data.insert(key(name), value.to_vec());
         true
     }
 
     fn remove_key(&mut self, name: &str) {
-        self.data.remove(name);
+        self.data.remove(&key(name));
     }
 }
 
@@ -104,6 +114,17 @@ mod tests {
     #[test]
     fn bad_bytes_are_refused() {
         assert!(SessionStorage::from_bytes(&[0, 0, 0, 9, 1]).is_none());
+    }
+
+    #[test]
+    fn friend_in_another_folder_finds_the_hosts_save() {
+        let mut host = SessionStorage::default();
+        host.put("localhost/Users/liam/games/BadIceCream_coop.swf/so_badicecream", &[5]);
+        let friend = SessionStorage::from_bytes(&host.to_bytes()).expect("valid bytes");
+        assert_eq!(
+            friend.get("localhost/Downloads/BadIceCream_coop.swf/so_badicecream"),
+            Some(vec![5])
+        );
     }
 
     #[test]
