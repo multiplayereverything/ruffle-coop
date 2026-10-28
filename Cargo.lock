@@ -4863,6 +4863,7 @@ dependencies = [
  "ruffle_video_external",
  "ruffle_video_software",
  "sys-locale",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml_edit",
