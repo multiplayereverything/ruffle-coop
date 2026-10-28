@@ -48,3 +48,12 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - `python tools/coop-lab/lab.py --swf <swf>`: two players on one PC, through a local relay with lag and
   directly.
 - `COOP_TEST_SWF=<swf> cargo test -p ruffle_desktop --release coop::` runs the session tests on the game.
+
+## Known limits (v1)
+
+- Bad Ice-Cream's keys only; P (pause), M (mute) and Esc don't reach the game in a session.
+- During a session there is no menu, no fullscreen, and no opening another file; the stage keeps the game's
+  own size (the window can still be resized).
+- Games whose logic waits for a sound to finish, reads a sound's position, or loops over a Dictionary keyed by
+  objects may drift; the sync check warns if they do.
+- Network loads (URLLoader, Loader from the web) don't happen in a session.

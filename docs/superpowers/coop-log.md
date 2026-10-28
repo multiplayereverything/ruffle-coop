@@ -27,3 +27,13 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   | local relay, 40 ms one-way lag + 0-10 ms jitter | none | 145 / 154 ms | 113 / 117 ms |
   | direct | none | 121 / 125 ms | 114 / 118 ms |
 - Not yet: two real PCs, the windowed session by hand, the relay `ruffle-coop` game in mods-info (needs OK).
+- Final review (fresh reviewer): fixed the 2 critical and 7 of 9 important findings, each with a test where one
+  is possible (friend's cursor outside the window, exact host mouse, full preload, saves in another folder,
+  stray connections, refused-friend retry, player settings in the handshake, window/fullscreen/menu/open
+  blocked, no network loads, message boxes). Not fixed, documented: sound end/position feeding back into
+  games (Bad Ice-Cream doesn't use it), Dictionary object-key order (upstream). All decisions:
+  docs/superpowers/coop-decisions.md.
+- After the fixes: desktop 86/86 (with COOP_TEST_SWF), core 129/129, SWF suite 4291 passed / 0 failed,
+  lab 900 frames both modes in sync (felt delay ~101 ms direct, 101-113 ms through a laggy relay).
+- Known limits for v1: Bad Ice-Cream keys only (P pause, M mute and Esc never reach the game), window title
+  is the only status display, the windowed session hasn't been run by hand or on two real PCs yet.
