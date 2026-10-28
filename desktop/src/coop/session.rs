@@ -82,6 +82,10 @@ pub struct Session {
     paced: bool,
     /// When the next frame is due (paced sessions).
     next_due: Option<Instant>,
+    /// When each local input was taken, by the frame it is for: the time until that frame
+    /// runs is the input delay this player feels.
+    taken_at: HashMap<u32, Instant>,
+    felt_delay: Vec<Duration>,
     state: SessionState,
 }
 
@@ -236,6 +240,8 @@ impl Session {
             last_frame_at: Instant::now(),
             paced: opts.paced,
             next_due: None,
+            taken_at: HashMap::new(),
+            felt_delay: vec![],
             state: SessionState::default(),
         })
     }
@@ -337,6 +343,7 @@ impl Session {
             while self.local_sent <= self.lockstep.frame() {
                 let input = self.local_input();
                 let (frame, input) = self.lockstep.push_local(input);
+                self.taken_at.insert(frame, now);
                 self.link.send(&Msg::Input { player: self.local_index, frame, input });
                 self.local_sent += 1;
             }
@@ -347,6 +354,9 @@ impl Session {
             // after a long stall, don't sprint through more than the catch-up allows
             self.next_due = Some((due + frame_time).max(now - frame_time * MAX_CATCH_UP));
             let frame = self.lockstep.frame();
+            if let Some(taken) = self.taken_at.remove(&frame) {
+                self.felt_delay.push(taken.elapsed());
+            }
             self.lockstep.advance();
             self.last_frame_at = Instant::now();
             if frame % CHECK_EVERY == CHECK_EVERY - 1 {
@@ -432,6 +442,16 @@ impl Session {
         }
     }
 
+    /// How long this PC's inputs took to reach the game (input taken -> its frame runs).
+    pub fn felt_delay(&self) -> &[Duration] {
+        &self.felt_delay
+    }
+
+    /// The next frame to run (for logs).
+    pub fn frames_run(&self) -> u32 {
+        self.lockstep.frame()
+    }
+
     /// What the window title shows.
     pub fn title(&self) -> String {
         let mut title = String::from("Ruffle Together");
@@ -448,6 +468,37 @@ impl Session {
         }
         title
     }
+}
+
+/// `--coop-headless`: plays `frames` frames without a window and prints one result line.
+pub fn run_headless(mut session: Session, swf: &Path, frames: u32) -> Result<()> {
+    let player =
+        crate::coop::replay::headless_player(swf, Some(session.clock()), session.take_storage())?;
+    let mut player = player.lock().map_err(|_| anyhow!("player lock"))?;
+    let started = Instant::now();
+    let state = loop {
+        let state = session.tick(&mut player);
+        if session.frames_run() >= frames || state.closed.is_some() {
+            break state;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    let mut delays: Vec<f64> = session.felt_delay().iter().map(|d| d.as_secs_f64() * 1000.0).collect();
+    delays.sort_by(f64::total_cmp);
+    let at = |q: f64| delays.get(((delays.len() as f64 - 1.0) * q) as usize).copied().unwrap_or(-1.0);
+    println!(
+        "COOP RESULT player={} frames={} seconds={:.1} desync_at={} closed={} \
+         felt_delay_ms_median={:.0} p95={:.0} max={:.0}",
+        session.local_index + 1,
+        session.frames_run(),
+        started.elapsed().as_secs_f64(),
+        state.desync_at.map_or("none".into(), |f| f.to_string()),
+        state.closed.as_deref().unwrap_or("no"),
+        at(0.5),
+        at(0.95),
+        at(1.0),
+    );
+    Ok(())
 }
 
 impl Drop for Session {

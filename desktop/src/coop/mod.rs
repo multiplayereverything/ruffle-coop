@@ -61,6 +61,11 @@ pub struct CoopOpt {
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]
     pub coop_name: String,
 
+    /// Testing: play the session without a window for --coop-frames frames, then print the
+    /// result (sync, input delay) and exit.
+    #[clap(long, help_heading = "Ruffle Together")]
+    pub coop_headless: bool,
+
     /// Testing: scripted input instead of the keyboard and mouse.
     #[clap(long, value_name = "FILE", help_heading = "Ruffle Together")]
     pub coop_script: Option<PathBuf>,

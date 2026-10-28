@@ -1,0 +1,126 @@
+"""Ruffle Together lab: two players on this PC, no windows, scripted input.
+
+Runs two `ruffle_desktop --coop-headless` players against each other, through a local copy of the
+relay with simulated lag (relay mode) or directly (direct mode), and prints each player's result:
+whether the games stayed in sync and how long inputs took to reach the game.
+
+  python tools/coop-lab/lab.py --swf <BadIceCream_coop.swf> [--mode relay|direct|both]
+      [--frames 4500] [--lag 40] [--jitter 10] [--delay 3]
+
+Nothing touches the keyboard or mouse; test ports avoid the ones real games use.
+"""
+import argparse
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+RUFFLE = os.path.join(ROOT, "target", "release", "ruffle_desktop.exe")
+SCRIPT = os.path.join(ROOT, "desktop", "tests", "coop", "bic-two-players.txt")
+RELAY = os.path.join(ROOT, "..", "global-mods-server", "init.py")
+RESERVED = {6420, 7777, 7778, 7779, 27015, 27016, 27020, 27021}
+
+
+def free_port():
+    while True:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        if port not in RESERVED:
+            return port
+
+
+def player(args, role_args, name, out):
+    cmd = [RUFFLE, "--coop-headless", "--coop-frames", str(args.frames), "--coop-script", SCRIPT,
+           "--coop-delay", str(args.delay), "--coop-name", name] + role_args + [args.swf]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    out[name] = {"proc": proc, "lines": []}
+    return proc
+
+
+def read_lines(entry, code_found=None):
+    for line in entry["proc"].stdout:
+        line = line.rstrip()
+        entry["lines"].append(line)
+        if code_found is not None:
+            m = re.search(r"room code: (\w{5})", line)
+            if m:
+                code_found.append(m.group(1))
+
+
+def run(args, mode):
+    out, relay = {}, None
+    try:
+        if mode == "relay":
+            games = os.path.join(tempfile.mkdtemp(), "games.json")
+            json.dump({"ruffle-coop": {"name": "Ruffle Together", "mode": "star", "max_players": 4}}, open(games, "w"))
+            port = free_port()
+            relay = subprocess.Popen([sys.executable, RELAY, "--port", str(port), "--no-mods-info", "--no-discord",
+                                      "--games", games, "--sim-delay", str(args.lag), "--sim-jitter", str(args.jitter)],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(100):
+                try:
+                    socket.create_connection(("127.0.0.1", port), 0.2).close()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            addr = "127.0.0.1:%d" % port
+            code = []
+            host = player(args, ["--coop-host-relay", addr], "Host", out)
+            t = threading.Thread(target=read_lines, args=(out["Host"], code), daemon=True)
+            t.start()
+            for _ in range(200):
+                if code:
+                    break
+                time.sleep(0.05)
+            if not code:
+                return "no room code from the host: " + " | ".join(out["Host"]["lines"][-5:])
+            friend = player(args, ["--coop-join-relay", addr, "--coop-code", code[0]], "Friend", out)
+        else:
+            port = free_port()
+            host = player(args, ["--coop-host", str(port)], "Host", out)
+            t = threading.Thread(target=read_lines, args=(out["Host"],), daemon=True)
+            t.start()
+            time.sleep(1.0)
+            friend = player(args, ["--coop-join", "127.0.0.1:%d" % port], "Friend", out)
+        read_lines(out["Friend"])
+        friend.wait(timeout=args.frames / 25 + 120)
+        host.wait(timeout=60)
+        t.join(timeout=5)
+    finally:
+        for entry in out.values():
+            if entry["proc"].poll() is None:
+                entry["proc"].kill()
+        if relay:
+            relay.kill()
+    results = []
+    for name, entry in out.items():
+        line = next((l for l in entry["lines"] if "COOP RESULT" in l), None)
+        results.append("%s: %s" % (name, line or "no result; last output: " + " | ".join(entry["lines"][-3:])))
+    return "\n".join(results)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--swf", required=True)
+    ap.add_argument("--mode", choices=["relay", "direct", "both"], default="both")
+    ap.add_argument("--frames", type=int, default=4500, help="4500 frames = 3 minutes at 25 fps")
+    ap.add_argument("--lag", type=float, default=40, help="relay: one-way delay, ms")
+    ap.add_argument("--jitter", type=float, default=10, help="relay: extra random delay 0..N ms")
+    ap.add_argument("--delay", type=int, default=3, help="input delay, frames")
+    args = ap.parse_args()
+    for mode in (["relay", "direct"] if args.mode == "both" else [args.mode]):
+        extra = " (lag %g ms one way + 0-%g ms jitter)" % (args.lag, args.jitter) if mode == "relay" else ""
+        print("== %s, %d frames, input delay %d frames%s" % (mode, args.frames, args.delay, extra))
+        print(run(args, mode))
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()
