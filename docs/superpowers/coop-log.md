@@ -78,3 +78,15 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   ran a frame. After: 30.0 shown per second in both windows for 55 s, same fingerprints at 24/774/1524;
   desktop tests 88/88. Not fixed (minor at 10 ms ping): the host always waits on the friend's input because the
   friend starts later; the host's picture follows packet arrival.
+- User played two local windows on 1.0.2-pre (redraw fix): "way better" but input delay and some stutter. Their
+  log: perfect while idle; late frames 9-16 per 5 s exactly when pictures shown rose to 40-56/s (their keys and mouse).
+  Cause: egui asks for a repaint on every input event; each present waits for vsync and starves the frame loop.
+  Fix: PictureGate (session.rs) shows one picture per new game frame (or after 100 ms stale); render_movie_if_needed
+  no longer asks for egui repaints while a session runs (else a busy loop: 48k loop passes per 5 s).
+  New windowed lab tools/coop-lab/windows_lab.py: two real windows, scripted keys, modes quiet and pressure
+  (WM_MOUSEMOVE posted to the two Ruffle windows only, 125/s); limits fps >= 29.5, shown 28-32.5/s, late <= 3
+  per run, <= 5000 loop passes per 5 s, equal fingerprints. Proven to fail: current build before the loop fix
+  (busy loop 48k), gate switched off (pressure: 60 shown/s, friend 89 late frames, loop passes ~300). After both
+  fixes: quiet PASS x3 of 4 (one run had a single ~500 ms stall in both windows at once, unexplained), pressure
+  PASS. Input delay in the lab ~101 ms (3 frames). lab.py relay at 5 ms + 5 ms jitter (Radmin-like), 900 frames:
+  delay 3 host 122 / friend 101 ms median; delay 2 67 / 67; delay 1 34 / 59 (friend waits). Desktop tests 89/89.

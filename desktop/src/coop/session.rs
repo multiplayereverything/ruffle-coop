@@ -130,7 +130,32 @@ pub struct Session {
     taken_at: HashMap<u32, Instant>,
     felt_delay: Vec<Duration>,
     timing: Timing,
+    picture: PictureGate,
     state: SessionState,
+}
+
+/// When the window shows a picture in a session: once per new game frame. Every key press and
+/// mouse move also asks for a repaint, and each repaint waits for the screen's refresh, which
+/// held up the game's frames (stutter while playing). A picture with no new frame only goes
+/// through once it is `STALE`, so a resized or uncovered window still repaints while the game waits.
+#[derive(Default)]
+struct PictureGate {
+    frame: Option<u32>,
+    at: Option<Instant>,
+}
+
+impl PictureGate {
+    const STALE: Duration = Duration::from_millis(100);
+
+    fn allow(&mut self, frame: u32, now: Instant) -> bool {
+        let new_frame = self.frame != Some(frame);
+        let stale = self.at.is_none_or(|at| now - at >= Self::STALE);
+        if new_frame || stale {
+            self.frame = Some(frame);
+            self.at = Some(now);
+        }
+        new_frame || stale
+    }
 }
 
 /// Where the time goes, logged every few seconds, so a slow session shows why.
@@ -148,6 +173,16 @@ struct Timing {
     waiting: Duration,
     longest_wait: Duration,
     waiting_since: Option<Instant>,
+    /// Frames that ran more than 1.25 frame times after the previous one (a visible hitch).
+    late: u32,
+    /// Ticks that ran 2+ frames, so a picture was skipped.
+    doubled: u32,
+    last_step: Option<Instant>,
+    frames_this_tick: u32,
+    /// Input taken -> its frame runs, for this PC's inputs.
+    felt_total: Duration,
+    felt_longest: Duration,
+    felt_count: u32,
 }
 
 impl Timing {
@@ -166,6 +201,13 @@ impl Timing {
             waiting: Duration::ZERO,
             longest_wait: Duration::ZERO,
             waiting_since: None,
+            late: 0,
+            doubled: 0,
+            last_step: None,
+            frames_this_tick: 0,
+            felt_total: Duration::ZERO,
+            felt_longest: Duration::ZERO,
+            felt_count: 0,
         }
     }
 
@@ -175,12 +217,27 @@ impl Timing {
         }
         self.last_tick = Some(now);
         self.ticks += 1;
+        self.frames_this_tick = 0;
     }
 
-    fn step(&mut self, took: Duration) {
+    fn step(&mut self, started: Instant, took: Duration, frame_time: Duration) {
+        if self.last_step.is_some_and(|last| started - last > frame_time * 5 / 4) {
+            self.late += 1;
+        }
+        self.last_step = Some(started);
+        self.frames_this_tick += 1;
+        if self.frames_this_tick == 2 {
+            self.doubled += 1;
+        }
         self.frames += 1;
         self.step_total += took;
         self.step_longest = self.step_longest.max(took);
+    }
+
+    fn felt(&mut self, delay: Duration) {
+        self.felt_total += delay;
+        self.felt_longest = self.felt_longest.max(delay);
+        self.felt_count += 1;
     }
 
     fn waiting(&mut self, now: Instant, waiting: bool) {
@@ -208,7 +265,7 @@ impl Timing {
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         let line = format!(
             "Ruffle Together timing: {:.1} fps (game {:.0}), {:.1} shown per second, {} ticks, longest tick gap {:.0} ms, \
-             frame cost avg {:.1} / max {:.0} ms, waited for input {:.0} ms of {:.0} (longest {:.0} ms)",
+             frame cost avg {:.1} / max {:.0} ms, waited for input {:.0} ms of {:.0} (longest {:.0} ms), {} late frames, {} doubled ticks, input delay avg {:.0} / max {:.0} ms",
             self.frames as f64 / span.as_secs_f64(),
             frame_rate,
             self.shown as f64 / span.as_secs_f64(),
@@ -219,9 +276,15 @@ impl Timing {
             ms(self.waiting),
             ms(span),
             ms(self.longest_wait),
+            self.late,
+            self.doubled,
+            ms(self.felt_total) / self.felt_count.max(1) as f64,
+            ms(self.felt_longest),
         );
         let still_waiting = self.waiting_since.is_some();
+        let last_step = self.last_step;
         *self = Self::new();
+        self.last_step = last_step;
         self.since = now;
         self.last_tick = Some(now);
         self.waiting_since = still_waiting.then_some(now);
@@ -404,6 +467,7 @@ impl Session {
             taken_at: HashMap::new(),
             felt_delay: vec![],
             timing: Timing::new(),
+            picture: PictureGate::default(),
             state: SessionState::default(),
         })
     }
@@ -532,12 +596,13 @@ impl Session {
             self.timing.waiting(now, false);
             let step_started = Instant::now();
             self.stepper.step(player, &inputs);
-            self.timing.step(step_started.elapsed());
+            self.timing.step(step_started, step_started.elapsed(), frame_time);
             // after a long stall, don't sprint through more than the catch-up allows
             self.next_due = Some((due + frame_time).max(now - frame_time * MAX_CATCH_UP));
             let frame = self.lockstep.frame();
             if let Some(taken) = self.taken_at.remove(&frame) {
                 self.felt_delay.push(taken.elapsed());
+                self.timing.felt(taken.elapsed());
             }
             self.lockstep.advance();
             self.last_frame_at = Instant::now();
@@ -630,12 +695,24 @@ impl Session {
         }
     }
 
-    /// How long this PC's inputs took to reach the game (input taken -> its frame runs).
-    /// The window drew a picture (for the timing line).
-    pub fn shown(&mut self) {
-        self.timing.shown += 1;
+    /// Not closed yet.
+    pub fn is_running(&self) -> bool {
+        self.state.closed.is_none()
     }
 
+    /// Whether the window should put a picture on screen now (see `PictureGate`).
+    pub fn allow_picture(&mut self) -> bool {
+        if !self.is_running() {
+            return true;
+        }
+        let allowed = self.picture.allow(self.lockstep.frame(), Instant::now());
+        if allowed {
+            self.timing.shown += 1;
+        }
+        allowed
+    }
+
+    /// How long this PC's inputs took to reach the game (input taken -> its frame runs).
     pub fn felt_delay(&self) -> &[Duration] {
         &self.felt_delay
     }
@@ -772,6 +849,19 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    /// Input events ask for repaints too, and each repaint waits for the screen; only a new frame
+    /// (or a picture gone stale, e.g. after a resize while the game waits) is shown.
+    #[test]
+    fn a_picture_is_shown_once_per_frame() {
+        let mut gate = PictureGate::default();
+        let t = Instant::now();
+        assert!(gate.allow(1, t), "a new frame is shown");
+        assert!(!gate.allow(1, t + Duration::from_millis(5)), "a repaint from input is not");
+        assert!(!gate.allow(1, t + Duration::from_millis(99)));
+        assert!(gate.allow(2, t + Duration::from_millis(100)), "the next frame is");
+        assert!(gate.allow(2, t + Duration::from_millis(200)), "a stale picture is redrawn");
     }
 
     #[test]

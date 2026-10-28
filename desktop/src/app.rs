@@ -59,11 +59,12 @@ impl MainWindow {
             // Don't render when nobody can see the result: while minimized, the
             // surface also keeps the size it had before, as `GuiController::resize`
             // refuses to reconfigure it to a zero size.
-            if !self.minimized && !self.occluded {
+            // Ruffle Together: in a session, only a new game frame is shown (see PictureGate)
+            if !self.minimized
+                && !self.occluded
+                && crate::coop::session().is_none_or(|mut session| session.allow_picture())
+            {
                 self.gui.render(self.player.get());
-                if let Some(mut session) = crate::coop::session() {
-                    session.shown();
-                }
             }
 
             // Important that we return here, or we'll get a feedback loop with egui
@@ -490,7 +491,11 @@ impl MainWindow {
         {
             player.render();
         }
-        if player_needs_render || self.gui.needs_render() {
+        // Ruffle Together: a running session asks for its own repaints (one per frame); egui's
+        // repaint wish stays set while those skip it, which would ask on every loop pass
+        let egui_repaint = self.gui.needs_render()
+            && crate::coop::session().is_none_or(|session| !session.is_running());
+        if player_needs_render || egui_repaint {
             self.gui.window().request_redraw();
         }
     }
