@@ -442,6 +442,9 @@ impl Session {
                 self.my_states.retain(|f, _| f + CHECK_EVERY * 8 > frame);
                 self.link.send(&Msg::Print { player: self.local_index, frame, hash });
                 self.compare(frame);
+                if frame % (CHECK_EVERY * 30) == CHECK_EVERY - 1 {
+                    tracing::info!("Ruffle Together: frame {frame}, fingerprint {hash:016x}");
+                }
             }
         }
 

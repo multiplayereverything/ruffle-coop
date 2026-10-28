@@ -299,8 +299,14 @@ impl ActivePlayer {
             }
         });
 
+        // Ruffle Together: only the game file loads (later loads would finish at a different
+        // frame on each PC)
+        builder = if crate::coop::session().is_some() {
+            builder.with_navigator(crate::coop::navigator::SessionNavigator::new(navigator))
+        } else {
+            builder.with_navigator(navigator)
+        };
         builder = builder
-            .with_navigator(navigator)
             .with_renderer(renderer)
             .with_storage(preferences.storage_backend().create_backend(&opt))
             .with_notification_sender(notification_sender)
@@ -345,9 +351,7 @@ impl ActivePlayer {
                 // the window size must not reach the game: only NO_SCALE makes the stage size
                 // follow the window and fires resize events, so a session forces SHOW_ALL
                 .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
-                .with_fullscreen(false)
-                // loads would finish at a different frame on each PC; a session makes none
-                .with_navigator(ruffle_core::backend::navigator::NullNavigatorBackend::new());
+                .with_fullscreen(false);
             session.clock()
         });
         let player = builder.build();

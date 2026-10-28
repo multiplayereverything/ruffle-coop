@@ -4,6 +4,7 @@
 pub mod frame;
 pub mod keymap;
 pub mod lockstep;
+pub mod navigator;
 pub mod net;
 pub mod protocol;
 pub mod script;

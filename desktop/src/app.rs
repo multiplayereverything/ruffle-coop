@@ -394,6 +394,7 @@ impl MainWindow {
             }
             let title = session.title();
             if title != self.coop_title {
+                tracing::info!("{title}");
                 self.gui.window().set_title(&title);
                 self.coop_title = title;
             }
