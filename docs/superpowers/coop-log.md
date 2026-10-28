@@ -131,3 +131,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   2p relay 20 ms lag 61/62 ms, 2p direct 33/33, 4p relay 92-93 ms, all in sync, 94.3-94.5 s. The 4p direct run
   failed to start: gunmayhem2_coop.swf was deleted from gm2-mod/dist at 20:06:57 by an online rebuild; asked the
   GM2 session to restore it outside dist/.
+- GM2 session published the same file (sha 080b5f9b...) as flash-games games/gunmayhem2/gunmayhem2_online.swf
+  (commit 5fe43fe, user's request there); the launcher's GM2 entry now downloads it, but released Ruffle Together
+  1.0.2 has no --coop-keys / 4 players -> GM2 online is broken for players until 1.0.3 + a launcher update.
+  On a private copy: lab 4p direct 36-37 ms, 3p relay 40 ms lag 119-120 ms, 3p direct 35 ms, all 3300 frames in
+  sync, 94.3-94.6 s. windows_lab limits now follow the game's own rate (GM2 35 fps read as a failure at 30's
+  limits) and print late frames per 5 s on failure. GM2 windows: pressure 35/35, 1 late; quiet 1st run 4 late +
+  34.4 fps min (not repeated), then 2 runs PASS (2-3 late = menu/map loads).

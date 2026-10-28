@@ -34,15 +34,16 @@ RESERVED = {6420, 7777, 7778, 7779, 27015, 27016, 27020, 27021}
 
 # one line every 5 s; the first two cover start-up and are not judged
 WARMUP_LINES = 2
+# fps and shown are relative to the game's own frame rate (Bad Ice-Cream 30, Gun Mayhem 2 35)
 LIMITS = {
-    "fps": 29.5,           # game frames per second, at least
-    "shown": (28.0, 32.5),  # pictures on screen per second (one per game frame)
+    "fps": -0.5,           # game frames per second, at least the game's rate minus this
+    "shown": (-2.0, 2.5),  # pictures on screen per second around the game's rate (one per game frame)
     "late_total": 3,       # frames > 1.25 frame times after the previous one, whole run (a level load costs ~2)
     "ticks": 5000,         # event-loop passes per 5 s, at most (more means a busy loop)
 }
 
 TIMING = re.compile(
-    r"timing: (?P<fps>[\d.]+) fps \(game \d+\), (?P<shown>[\d.]+) shown per second, (?P<ticks>\d+) ticks, "
+    r"timing: (?P<fps>[\d.]+) fps \(game (?P<game>\d+)\), (?P<shown>[\d.]+) shown per second, (?P<ticks>\d+) ticks, "
     r"longest tick gap (?P<gap>\d+) ms, frame cost avg (?P<cost>[\d.]+) / max (?P<cost_max>\d+) ms, "
     r"waited for input (?P<wait>\d+) ms of \d+ \(longest (?P<wait_max>\d+) ms\), (?P<late>\d+) late frames, "
     r"(?P<doubled>\d+) doubled ticks, input delay avg (?P<delay>\d+) / max (?P<delay_max>\d+) ms")
@@ -99,14 +100,16 @@ def judge(name, lines, prints):
     ticks = max(int(r["ticks"]) for r in rows)
     delay = sum(int(r["delay"]) for r in rows) / len(rows)
     delay_max = max(int(r["delay_max"]) for r in rows)
+    rate = float(rows[0]["game"])
     fails = []
-    if fps < LIMITS["fps"]:
+    if fps < rate + LIMITS["fps"]:
         fails.append(f"fps {fps}")
     lo, hi = LIMITS["shown"]
-    if min(shown) < lo or max(shown) > hi:
+    if min(shown) < rate + lo or max(shown) > rate + hi:
         fails.append(f"shown {min(shown)}-{max(shown)}/s")
     if late > LIMITS["late_total"]:
-        fails.append(f"{late} late frames")
+        # when they happened, per 5 s line after warm-up (a level load shows as one line with a few)
+        fails.append(f"{late} late frames {[int(r['late']) for r in rows]}")
     if ticks > LIMITS["ticks"]:
         fails.append(f"busy loop ({ticks} ticks per 5 s)")
     text = (f"{name}: fps min {fps}, shown {min(shown)}-{max(shown)}/s, late {late}, doubled {doubled}, "
