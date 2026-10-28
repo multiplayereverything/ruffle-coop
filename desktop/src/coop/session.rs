@@ -65,6 +65,9 @@ pub struct Session {
     stepper: Stepper,
     local_index: u8,
     names: Vec<String>,
+    /// Connection number -> player slot of the session's players (see `from` in net events).
+    peers: HashMap<u8, u8>,
+    hosting: bool,
     room: Option<String>,
     clock: Arc<Mutex<FrameClock>>,
     storage: Option<SessionStorage>,
@@ -170,15 +173,20 @@ impl Session {
                         };
                         let start = Msg::Start {
                             player_count: PLAYERS,
-                            your_index: from,
+                            // the friend's player slot (not its connection number: a refused
+                            // or stray connection must not shift it)
+                            your_index: 1,
                             delay: opts.delay,
                             start_unix_ms: now_unix_ms(),
                             frame_rate_milli: 0,
                             save,
                         };
+                        // the game starts: only this friend stays connected, and nobody new
+                        link.keep_only(&[from]);
+                        link.stop_accepting();
                         link.send(&me);
                         link.send(&start);
-                        break (start, vec![opts.name.clone(), name]);
+                        break (start, vec![opts.name.clone(), name], from);
                     }
                     Some(Event::Closed(reason)) => bail!("{reason}"),
                     _ => {}
@@ -200,7 +208,7 @@ impl Session {
                         host_name = name;
                     }
                     Some(Event::Msg { msg: start @ Msg::Start { .. }, .. }) => {
-                        break (start, vec![host_name, opts.name.clone()]);
+                        break (start, vec![host_name, opts.name.clone()], 0);
                     }
                     Some(Event::Closed(reason)) => bail!("{reason}"),
                     Some(_) => {}
@@ -209,7 +217,8 @@ impl Session {
             }
         };
 
-        let (Msg::Start { player_count, your_index, delay, start_unix_ms, save, .. }, names) = start
+        let (Msg::Start { player_count, your_index, delay, start_unix_ms, save, .. }, names, peer) =
+            start
         else {
             unreachable!("start is always a Start message");
         };
@@ -225,6 +234,9 @@ impl Session {
             lockstep: Lockstep::new(player_count, your_index, delay),
             stepper: Stepper::new(GameKeys::bad_ice_cream()),
             local_index: your_index,
+            // the host knows its friend by connection number; a friend hears everything from the host
+            peers: HashMap::from([(peer, if hosting { 1 } else { 0 })]),
+            hosting,
             names,
             room,
             clock: Arc::new(Mutex::new(FrameClock::new(start_unix_ms + opts.start_skew_ms))),
@@ -306,21 +318,36 @@ impl Session {
         }
         while let Some(event) = self.link.try_recv() {
             match event {
-                Event::Msg { msg: Msg::Input { player: p, frame, input }, .. } => {
-                    if p != self.local_index {
-                        self.lockstep.push_remote(p, frame, input);
+                Event::Msg { from, msg } => {
+                    // only the session's players count, and each only for its own slot (the
+                    // host passes the other friends' messages on, so a friend trusts the host)
+                    let Some(&slot) = self.peers.get(&from) else {
+                        continue;
+                    };
+                    let player_of = |p: u8| !self.hosting || p == slot;
+                    match msg {
+                        Msg::Input { player: p, frame, input }
+                            if p != self.local_index && player_of(p) =>
+                        {
+                            self.lockstep.push_remote(p, frame, input);
+                        }
+                        Msg::Print { player: p, frame, hash }
+                            if p != self.local_index && player_of(p) =>
+                        {
+                            self.peer_prints.insert((p, frame), hash);
+                            self.compare(frame);
+                        }
+                        Msg::Bye { player: p, reason } if player_of(p) => {
+                            self.close(format!("{} left ({reason})", self.name(p)));
+                        }
+                        _ => {}
                     }
                 }
-                Event::Msg { msg: Msg::Print { player: p, frame, hash }, .. } => {
-                    if p != self.local_index {
-                        self.peer_prints.insert((p, frame), hash);
-                        self.compare(frame);
+                Event::Left { player: conn } => {
+                    if let Some(&slot) = self.peers.get(&conn) {
+                        self.close(format!("{} left", self.name(slot)));
                     }
                 }
-                Event::Msg { msg: Msg::Bye { player: p, reason }, .. } => {
-                    self.close(format!("{} left ({reason})", self.name(p)));
-                }
-                Event::Left { player: p } => self.close(format!("{} left", self.name(p))),
                 Event::Closed(reason) => self.close(reason),
                 _ => {}
             }
@@ -671,6 +698,58 @@ mod tests {
         let (host_state, _) = host.join().expect("host");
         assert!(host_state.closed.is_some(), "host still waiting");
         assert!(left_at.elapsed() < Duration::from_secs(6));
+    }
+
+    #[test]
+    fn stray_connection_during_the_game_is_ignored() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        // paced (30 fps): 150 frames take 5 s, so the stray arrives mid-game
+        let paced = |mut o: SessionOpts| {
+            o.paced = true;
+            o
+        };
+        let host = thread::spawn(move || {
+            play(paced(opts(Role::HostDirect { port }, &host_swf, 0)), 150, None)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let addr = format!("127.0.0.1:{port}");
+            play(paced(opts(Role::JoinDirect { addr }, &swf, 0)), 150, None)
+        });
+        // a port scanner (or anyone) connects and leaves while the game runs
+        thread::sleep(Duration::from_millis(2000));
+        if let Ok(mut stray) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+            use std::io::Write;
+            let _ = stray.write_all(b"IN|1|200|31|-|-|-\0");
+        }
+        let (host_state, host_session) = host.join().expect("host");
+        let (join_state, _) = join.join().expect("join");
+        assert_eq!(host_state.closed, None, "a stray connection ended the session");
+        assert_eq!(host_state.desync_at, None);
+        assert_eq!(join_state.desync_at, None);
+        assert!(host_session.frame() >= 150);
+    }
+
+    #[test]
+    fn refused_friend_can_retry_with_the_right_file() {
+        let Some(swf) = test_swf() else { return };
+        let dir = tempfile::tempdir().expect("temp dir");
+        let wrong = dir.path().join("wrong.swf");
+        std::fs::write(&wrong, b"another game").expect("write");
+        let port = free_port();
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(opts(Role::HostDirect { port }, &host_swf, 0), 300, None));
+        thread::sleep(Duration::from_millis(300));
+        let addr = format!("127.0.0.1:{port}");
+        let refused = Session::start(opts(Role::JoinDirect { addr: addr.clone() }, &wrong, 0));
+        assert!(refused.is_err());
+        let (join_state, join_session) = play(opts(Role::JoinDirect { addr }, &swf, 0), 300, None);
+        let (host_state, _) = host.join().expect("host");
+        assert_eq!(join_state.closed, None);
+        assert_eq!(host_state.closed, None);
+        assert_eq!(join_session.local_index, 1);
     }
 
     #[test]

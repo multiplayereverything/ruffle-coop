@@ -82,7 +82,8 @@ pub struct Link {
     peers: Arc<Mutex<Vec<Peer>>>,
     events: Receiver<Event>,
     code: Option<String>,
-    stop: Arc<AtomicBool>,
+    /// Direct host: whether new friends may still connect.
+    accepting: Arc<AtomicBool>,
 }
 
 impl Link {
@@ -99,6 +100,22 @@ impl Link {
         self.events.try_recv().ok()
     }
 
+    /// Direct host: no more connections once the game has started (a port scanner or a late
+    /// friend must not be able to disturb it).
+    pub fn stop_accepting(&self) {
+        self.accepting.store(false, Ordering::Relaxed);
+    }
+
+    /// Direct host: disconnects every friend except `keep`.
+    pub fn keep_only(&self, keep: &[u8]) {
+        if let Ok(mut peers) = self.peers.lock() {
+            for peer in peers.iter().filter(|p| p.id != 0 && !keep.contains(&p.id)) {
+                peer.shutdown();
+            }
+            peers.retain(|p| p.id == 0 || keep.contains(&p.id));
+        }
+    }
+
     /// The relay room's code (relay host only).
     pub fn room_code(&self) -> Option<String> {
         self.code.clone()
@@ -107,7 +124,7 @@ impl Link {
 
 impl Drop for Link {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.accepting.store(false, Ordering::Relaxed);
         if let Ok(peers) = self.peers.lock() {
             for peer in peers.iter() {
                 peer.shutdown();
@@ -119,14 +136,14 @@ impl Drop for Link {
 pub fn connect(role: Role, version: &str, name: &str) -> io::Result<Link> {
     let (tx, events) = channel();
     let peers = Arc::new(Mutex::new(vec![]));
-    let stop = Arc::new(AtomicBool::new(false));
+    let accepting = Arc::new(AtomicBool::new(true));
     let mut code = None;
     match role {
         Role::HostDirect { port } => {
             let listener = TcpListener::bind(("0.0.0.0", port))?;
             listener.set_nonblocking(true)?;
-            let (peers, stop) = (peers.clone(), stop.clone());
-            thread::spawn(move || accept_loop(listener, peers, stop, tx));
+            let (peers, accepting) = (peers.clone(), accepting.clone());
+            thread::spawn(move || accept_loop(listener, peers, accepting, tx));
         }
         Role::JoinDirect { addr } => {
             let stream = TcpStream::connect(addr)?;
@@ -178,7 +195,7 @@ pub fn connect(role: Role, version: &str, name: &str) -> io::Result<Link> {
         peers,
         events,
         code,
-        stop,
+        accepting,
     })
 }
 
@@ -200,15 +217,16 @@ fn relay_handshake(relay: &str, first: &str) -> io::Result<(TcpStream, BufReader
     Ok((stream, reader))
 }
 
-/// Direct host: accepts friends (players 1, 2, ...) until the link is dropped.
+/// Direct host: accepts friends (connections 1, 2, ...) until the game starts or the link is
+/// dropped; the listening port closes then.
 fn accept_loop(
     listener: TcpListener,
     peers: Arc<Mutex<Vec<Peer>>>,
-    stop: Arc<AtomicBool>,
+    accepting: Arc<AtomicBool>,
     tx: Sender<Event>,
 ) {
     let mut next_id = 1u8;
-    while !stop.load(Ordering::Relaxed) {
+    while accepting.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = stream.set_nonblocking(false);
