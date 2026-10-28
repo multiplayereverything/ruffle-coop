@@ -341,7 +341,13 @@ impl ActivePlayer {
         let coop_clock = crate::coop::session().map(|mut session| {
             builder = std::mem::take(&mut builder)
                 .with_locale(ruffle_core::frame_clock::FrameClockLocale::new(session.clock()))
-                .with_storage(Box::new(session.take_storage()));
+                .with_storage(Box::new(session.take_storage()))
+                // the window size must not reach the game: only NO_SCALE makes the stage size
+                // follow the window and fires resize events, so a session forces SHOW_ALL
+                .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
+                .with_fullscreen(false)
+                // loads would finish at a different frame on each PC; a session makes none
+                .with_navigator(ruffle_core::backend::navigator::NullNavigatorBackend::new());
             session.clock()
         });
         let player = builder.build();

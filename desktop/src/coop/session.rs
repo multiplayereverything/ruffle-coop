@@ -53,6 +53,8 @@ pub struct SessionOpts {
     /// Player settings that change how a game behaves, as "name=value; ..." (see
     /// `settings_line`); every player must have the same.
     pub settings: String,
+    /// Show the room code in a window (there is no game window yet while the host waits).
+    pub dialogs: bool,
 }
 
 /// The player settings that change how a game behaves, for the handshake.
@@ -164,6 +166,15 @@ impl Session {
         if let Some(code) = &room {
             tracing::info!("Ruffle Together: room code {code}");
             println!("Ruffle Together room code: {code}");
+            if opts.dialogs {
+                let text = format!("Your room code is {code}\n\nTell your friend; the game starts when they join.");
+                std::thread::spawn(move || {
+                    let _ = rfd::MessageDialog::new()
+                        .set_title("Ruffle Together")
+                        .set_description(text)
+                        .show();
+                });
+            }
         }
         let settings = opts.settings.replace('|', " ");
         let me = Msg::Hello {
@@ -621,6 +632,7 @@ mod tests {
             start_skew_ms,
             paced: false,
             settings: "frame_rate=None; player_version=None".into(),
+            dialogs: false,
         }
     }
 

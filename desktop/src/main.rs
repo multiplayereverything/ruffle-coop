@@ -165,7 +165,7 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    let preferences = GlobalPreferences::load(opt)?;
+    let mut preferences = GlobalPreferences::load(opt)?;
 
     let logs_path = &preferences.cli.cache_directory.join("log");
     let log_path = preferences.log_filename_pattern().create_path(logs_path);
@@ -216,7 +216,7 @@ fn main() -> Result<(), Error> {
             ),
             None => None,
         };
-        let session = coop::session::Session::start(coop::session::SessionOpts {
+        let started = coop::session::Session::start(coop::session::SessionOpts {
             role,
             name: coop.coop_name.clone(),
             delay: coop.coop_delay,
@@ -227,11 +227,30 @@ fn main() -> Result<(), Error> {
             start_skew_ms: 0,
             paced: true,
             settings: coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
-        })?;
+            dialogs: !coop.coop_headless,
+        });
+        let session = match started {
+            Ok(session) => session,
+            Err(error) => {
+                // launched from a shortcut there is no console: say it in a window
+                tracing::error!("Ruffle Together: {error:#}");
+                if !preferences.cli.coop.coop_headless {
+                    let _ = rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_title("Ruffle Together")
+                        .set_description(format!("Can't start the session: {error:#}"))
+                        .show();
+                }
+                return Err(error);
+            }
+        };
         if coop.coop_headless {
             return coop::session::run_headless(session, &swf, coop.coop_frames);
         }
         coop::set_session(session);
+        // no menu in a session: it changes things the game sees (scale, quality, fullscreen)
+        // or opens another game
+        preferences.cli.no_gui = true;
     }
 
     let result = App::new(preferences).and_then(|(mut app, event_loop)| {

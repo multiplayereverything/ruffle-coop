@@ -124,7 +124,7 @@ impl MainWindow {
                 // if they happen when the movie is busy.
                 self.mouse_move_pending = true;
             }
-            WindowEvent::DroppedFile(file) => {
+            WindowEvent::DroppedFile(file) if crate::coop::session().is_none() => {
                 if let Some(content_descriptor) = ContentDescriptor::new_local(&file, None) {
                     self.gui.create_movie(
                         &mut self.player,
@@ -196,12 +196,12 @@ impl MainWindow {
                 let event = PlayerEvent::MouseWheel { delta };
                 self.handle_player_event(event);
             }
-            WindowEvent::CursorEntered { .. } => {
+            WindowEvent::CursorEntered { .. } if crate::coop::session().is_none() => {
                 if let Some(mut player) = self.player.get() {
                     player.set_mouse_in_stage(true);
                 }
             }
-            WindowEvent::CursorLeft { .. } => {
+            WindowEvent::CursorLeft { .. } if crate::coop::session().is_none() => {
                 // The movie has to see the latest position while the mouse
                 // is still in the stage.
                 self.flush_mouse_move();
@@ -687,7 +687,9 @@ impl ApplicationHandler<RuffleEvent> for App {
                 });
             }
 
-            (Some(main_window), RuffleEvent::Open(desc, options)) => {
+            (Some(main_window), RuffleEvent::Open(desc, options))
+                if crate::coop::session().is_none() || main_window.player.get().is_none() =>
+            {
                 main_window
                     .gui
                     .create_movie(&mut main_window.player, *options, desc);
@@ -697,7 +699,7 @@ impl ApplicationHandler<RuffleEvent> for App {
                 main_window.gui.open_dialog(descriptor);
             }
 
-            (Some(main_window), RuffleEvent::CloseFile) => {
+            (Some(main_window), RuffleEvent::CloseFile) if crate::coop::session().is_none() => {
                 main_window.gui.window().set_title("Ruffle"); // Reset title since file has been closed.
                 main_window.gui.close_movie(&mut main_window.player);
             }
@@ -706,7 +708,7 @@ impl ApplicationHandler<RuffleEvent> for App {
                 main_window.gui.export_bundle();
             }
 
-            (Some(main_window), RuffleEvent::EnterFullScreen) => {
+            (Some(main_window), RuffleEvent::EnterFullScreen) if crate::coop::session().is_none() => {
                 if let Some(mut player) = main_window.player.get()
                     && player.is_playing()
                 {
@@ -714,7 +716,7 @@ impl ApplicationHandler<RuffleEvent> for App {
                 }
             }
 
-            (Some(main_window), RuffleEvent::ExitFullScreen) => {
+            (Some(main_window), RuffleEvent::ExitFullScreen) if crate::coop::session().is_none() => {
                 if let Some(mut player) = main_window.player.get()
                     && player.is_playing()
                 {
