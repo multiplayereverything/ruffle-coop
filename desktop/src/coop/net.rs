@@ -372,6 +372,7 @@ mod tests {
         Msg::Hello {
             build: "test".into(),
             swf_sha256: "abc".into(),
+            settings: String::new(),
             name: name.into(),
         }
     }

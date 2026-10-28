@@ -226,6 +226,7 @@ fn main() -> Result<(), Error> {
             host_wait: None,
             start_skew_ms: 0,
             paced: true,
+            settings: coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
         })?;
         if coop.coop_headless {
             return coop::session::run_headless(session, &swf, coop.coop_frames);

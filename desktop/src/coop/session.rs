@@ -50,6 +50,41 @@ pub struct SessionOpts {
     pub start_skew_ms: i64,
     /// Run at the game's frame rate (always, except in fast tests).
     pub paced: bool,
+    /// Player settings that change how a game behaves, as "name=value; ..." (see
+    /// `settings_line`); every player must have the same.
+    pub settings: String,
+}
+
+/// The player settings that change how a game behaves, for the handshake.
+pub fn settings_line(launch: &crate::player::LaunchOptions) -> String {
+    let p = &launch.player;
+    [
+        format!("flashvars={:?}", p.parameters),
+        format!("quality={:?}", p.quality),
+        format!("align={:?}", p.align),
+        format!("force_align={:?}", p.force_align),
+        format!("scale={:?}", p.scale),
+        format!("force_scale={:?}", p.force_scale),
+        format!("load_behavior={:?}", p.load_behavior),
+        format!("letterbox={:?}", p.letterbox),
+        format!("player_version={:?}", p.player_version),
+        format!("player_runtime={:?}", p.player_runtime),
+        format!("frame_rate={:?}", p.frame_rate),
+        format!("dummy_external_interface={:?}", p.dummy_external_interface),
+        format!("spoof_url={:?}", p.spoof_url.as_ref().map(|u| u.as_str())),
+        format!("avm2_optimizer={:?}", launch.avm2_optimizer_enabled),
+    ]
+    .join("; ")
+}
+
+/// The first setting that differs, e.g. "frame_rate (Some(60.0) here, None on the other PC)".
+fn settings_difference(mine: &str, theirs: &str) -> Option<String> {
+    let theirs: HashMap<&str, &str> =
+        theirs.split("; ").filter_map(|kv| kv.split_once('=')).collect();
+    mine.split("; ").filter_map(|kv| kv.split_once('=')).find_map(|(name, value)| {
+        let other = theirs.get(name).copied().unwrap_or("missing");
+        (other != value).then(|| format!("{name} ({value} here, {other} on the other PC)"))
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -130,18 +165,21 @@ impl Session {
             tracing::info!("Ruffle Together: room code {code}");
             println!("Ruffle Together room code: {code}");
         }
+        let settings = opts.settings.replace('|', " ");
         let me = Msg::Hello {
             build: build.clone(),
             swf_sha256: swf_sha256.clone(),
+            settings: settings.clone(),
             name: opts.name.clone(),
         };
-        let mismatch = |their_build: &str, their_swf: &str| {
+        let mismatch = |their_build: &str, their_swf: &str, their_settings: &str| {
             if their_build != build {
                 Some(format!("different Ruffle Together build ({their_build}, this one is {build})"))
             } else if their_swf != swf_sha256 {
                 Some("different game file".to_string())
             } else {
-                None
+                settings_difference(&settings, their_settings)
+                    .map(|what| format!("different player settings: {what}"))
             }
         };
 
@@ -157,9 +195,9 @@ impl Session {
                 match next_event(&link, left.min(Duration::from_millis(500))) {
                     Some(Event::Msg {
                         from,
-                        msg: Msg::Hello { build: b, swf_sha256: s, name },
+                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, name },
                     }) => {
-                        if let Some(reason) = mismatch(&b, &s) {
+                        if let Some(reason) = mismatch(&b, &s, &o) {
                             tracing::warn!("Ruffle Together: refused {name}: {reason}");
                             link.send(&Msg::Refuse { reason });
                             continue;
@@ -199,10 +237,10 @@ impl Session {
                 match next_event(&link, Duration::from_secs(30)) {
                     Some(Event::Msg { msg: Msg::Refuse { reason }, .. }) => bail!("{reason}"),
                     Some(Event::Msg {
-                        msg: Msg::Hello { build: b, swf_sha256: s, name },
+                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, name },
                         ..
                     }) => {
-                        if let Some(reason) = mismatch(&b, &s) {
+                        if let Some(reason) = mismatch(&b, &s, &o) {
                             bail!("{reason}");
                         }
                         host_name = name;
@@ -582,6 +620,7 @@ mod tests {
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,
             paced: false,
+            settings: "frame_rate=None; player_version=None".into(),
         }
     }
 
@@ -750,6 +789,26 @@ mod tests {
         assert_eq!(join_state.closed, None);
         assert_eq!(host_state.closed, None);
         assert_eq!(join_session.local_index, 1);
+    }
+
+    #[test]
+    fn different_player_settings_are_refused_by_name() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let game = dir.path().join("game.swf");
+        std::fs::write(&game, b"one game").expect("write");
+        let port = free_port();
+        let host_game = game.clone();
+        let host = thread::spawn(move || {
+            let mut o = opts(Role::HostDirect { port }, &host_game, 0);
+            o.host_wait = Some(Duration::from_secs(3));
+            Session::start(o).err().map(|e| e.to_string())
+        });
+        thread::sleep(Duration::from_millis(300));
+        let mut friend = opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &game, 0);
+        friend.settings = "frame_rate=Some(60.0); player_version=None".into();
+        let err = Session::start(friend).err().expect("different settings must be refused");
+        assert!(err.to_string().contains("frame_rate"), "{err}");
+        host.join().expect("host");
     }
 
     #[test]

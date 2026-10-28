@@ -9,6 +9,8 @@ pub enum Msg {
     Hello {
         build: String,
         swf_sha256: String,
+        /// The player settings that change how a game behaves (frame rate, Flash version, ...).
+        settings: String,
         name: String,
     },
     /// Host to everyone: what both games need to start identically.
@@ -43,8 +45,15 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Hello {
             build,
             swf_sha256,
+            settings,
             name,
-        } => format!("HI|{}|{}|{}", clean(build), clean(swf_sha256), clean(name)),
+        } => format!(
+            "HI|{}|{}|{}|{}",
+            clean(build),
+            clean(swf_sha256),
+            clean(settings),
+            clean(name)
+        ),
         Msg::Start {
             player_count,
             your_index,
@@ -92,11 +101,12 @@ pub fn decode(line: &str) -> Result<Msg, String> {
     };
     match parts[0] {
         "HI" => {
-            want(4)?;
+            want(5)?;
             Ok(Msg::Hello {
                 build: text(1)?,
                 swf_sha256: text(2)?,
-                name: text(3)?,
+                settings: text(3)?,
+                name: text(4)?,
             })
         }
         "ST" => {
@@ -174,6 +184,7 @@ mod tests {
         roundtrip(Msg::Hello {
             build: "0.1.0#abc123".into(),
             swf_sha256: "4635ddfc".into(),
+            settings: "frame_rate=None; quality=None".into(),
             name: "Liam".into(),
         });
         roundtrip(Msg::Start {
@@ -236,6 +247,7 @@ mod tests {
         let line = encode(&Msg::Hello {
             build: "b".into(),
             swf_sha256: "s".into(),
+            settings: String::new(),
             name: "a|b\nc\0d".into(),
         });
         assert_eq!(
@@ -243,6 +255,7 @@ mod tests {
             Ok(Msg::Hello {
                 build: "b".into(),
                 swf_sha256: "s".into(),
+                settings: String::new(),
                 name: "a b c d".into(),
             })
         );
