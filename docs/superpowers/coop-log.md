@@ -161,3 +161,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   connection; friend_leaving test < 6 s still passes) + a WARN "the game waited N s" after any stall > 2 s -> GREEN.
   Tests 98/98. Not confirmed: the host's log (other PC) for what stalled. GM2 also floods the log with AVM1 "Cannot
   delete property onEnterFrame" warnings (1.5 MB per game).
+- Release v1.0.3.1 (user: "its not a huge one so like 1.031"; four-part version so it sorts after 1.0.3 and before
+  a future 1.0.4: the launcher's compareVersions and the mods-info schema both take up to 4 parts). Commit 789cddb,
+  tests 98/98, zip SHA-256 bfa87cc6...ce26, latest, re-downloaded hash matches. Live relay GM2 2p with the
+  downloaded exe (room SQ9DL): ping 160 ms -> 4 frames, 116/116 ms, 1500 frames in 42.9 s, in sync, no stall
+  lines. mods-info 430e0f5: ruffle-coop 1.0.3.1.
