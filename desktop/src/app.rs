@@ -429,7 +429,7 @@ impl MainWindow {
 
     /// Ruffle Together: this PC's keys and mouse go to the session, which sends them to everyone
     /// and presses them on every PC's game at the same frame. Nothing reaches the game directly.
-    fn coop_input(&mut self, event: PlayerEvent) -> bool {
+    fn coop_input(&self, event: PlayerEvent) -> bool {
         let Some(mut session) = crate::coop::session() else {
             return false;
         };

@@ -102,7 +102,7 @@ pub fn decode(line: &str) -> Result<Msg, String> {
         "ST" => {
             want(7)?;
             let hex = parts[6];
-            if hex.len() % 2 != 0 {
+            if !hex.len().is_multiple_of(2) {
                 return Err(bad());
             }
             let save = (0..hex.len())

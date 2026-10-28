@@ -289,7 +289,7 @@ impl Session {
         }
     }
 
-    fn local_input(&mut self) -> InputFrame {
+    fn local_input(&self) -> InputFrame {
         if let Some(script) = &self.script {
             return script.input(self.local_sent as usize, self.local_index as usize);
         }
