@@ -43,4 +43,13 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   direct, 75 s: both windows identical fingerprints at frames 24, 774, 1524, no warnings. Live relay
   195.60.166.57:25569 with room code Z9ELK, 60 s: identical at 24, 774, 1524.
 - mods-info: ruffle-coop pushed (025f6f5, user OK); the live relay accepted it 9 minutes later.
-- Release v1.0.0 published (user asked): tag v1.0.0 on 0b9247d, asset RuffleTogether-1.0.0-windows-x64.zip (ruffle_desktop.exe, README.md, LICENSE.md), SHA-256 F1886A7E...6590, re-downloaded and hash checked. Build id rc-1.0.0#0b9247df45. Not a prerelease. mods-info ruffle-coop still says 0.7.1 (update needs the user's OK).
+- Release v1.0.0 published (user asked): tag v1.0.0 on 0b9247d, asset RuffleTogether-1.0.0-windows-x64.zip (ruffle_desktop.exe, README.md, LICENSE.md), SHA-256 F1886A7E...6590, re-downloaded and hash checked. Build id rc-1.0.0#0b9247df45. Not a prerelease. mods-info ruffle-coop later updated to 1.0.0 (checked 2026-10-28).
+- User's first two-PC test (LAN): in sync, but "freezing a lot, choppy, slow motion"; solo play smooth on the same PCs.
+  Added a timing line to the log every 5 s (fps, event-loop gaps, frame cost, time waiting for the other PC's
+  input and the longest wait). Two windows on this PC, direct: 30.0 fps, frame cost avg 0.3-6.7 ms, 0 ms waiting.
+  Through a local relay with 30 ms + 0-120 ms jitter: 30 fps average but the host waited for input 100% of the
+  time (longest 150 ms), the friend ~15% (longest 75 ms). Finding: the host needs the ROUND TRIP under the input
+  delay (100 ms) because the friend starts one trip later; the friend only needs the one-way trip. Over that, the
+  picture follows packet arrival (freeze, then several frames at once). Nagle is off on every socket (checked).
+  Not yet known: what the user's LAN does (Wi-Fi?). Test build with the timing line: test-build/ (not committed),
+  sha256 cac226fd...cbb9; asked the user for both PCs' ruffle.log and a ping.

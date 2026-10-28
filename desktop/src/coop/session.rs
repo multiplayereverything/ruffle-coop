@@ -30,7 +30,7 @@ const SHOW_WAITING: Duration = Duration::from_secs(2);
 const GIVE_UP: Duration = Duration::from_secs(5);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
-pub const VERSION: &str = "1.0.0";
+pub const VERSION: &str = "1.0.1";
 
 /// This build, as the relay and the other players see it: a different build is refused.
 pub fn build_id() -> String {
@@ -129,7 +129,100 @@ pub struct Session {
     /// runs is the input delay this player feels.
     taken_at: HashMap<u32, Instant>,
     felt_delay: Vec<Duration>,
+    timing: Timing,
     state: SessionState,
+}
+
+/// Where the time goes, logged every few seconds, so a slow session shows why.
+struct Timing {
+    since: Instant,
+    last_tick: Option<Instant>,
+    ticks: u32,
+    frames: u32,
+    longest_tick_gap: Duration,
+    step_total: Duration,
+    step_longest: Duration,
+    /// Time a frame was due but someone's input wasn't in yet.
+    waiting: Duration,
+    longest_wait: Duration,
+    waiting_since: Option<Instant>,
+}
+
+impl Timing {
+    const EVERY: Duration = Duration::from_secs(5);
+
+    fn new() -> Self {
+        Self {
+            since: Instant::now(),
+            last_tick: None,
+            ticks: 0,
+            frames: 0,
+            longest_tick_gap: Duration::ZERO,
+            step_total: Duration::ZERO,
+            step_longest: Duration::ZERO,
+            waiting: Duration::ZERO,
+            longest_wait: Duration::ZERO,
+            waiting_since: None,
+        }
+    }
+
+    fn tick(&mut self, now: Instant) {
+        if let Some(last) = self.last_tick {
+            self.longest_tick_gap = self.longest_tick_gap.max(now - last);
+        }
+        self.last_tick = Some(now);
+        self.ticks += 1;
+    }
+
+    fn step(&mut self, took: Duration) {
+        self.frames += 1;
+        self.step_total += took;
+        self.step_longest = self.step_longest.max(took);
+    }
+
+    fn waiting(&mut self, now: Instant, waiting: bool) {
+        match (waiting, self.waiting_since) {
+            (true, None) => self.waiting_since = Some(now),
+            (false, Some(since)) => {
+                self.waiting += now - since;
+                self.longest_wait = self.longest_wait.max(now - since);
+                self.waiting_since = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// The summary line once per `EVERY`, then starts over.
+    fn report(&mut self, now: Instant, frame_rate: f64) -> Option<String> {
+        let span = now - self.since;
+        if span < Self::EVERY {
+            return None;
+        }
+        if let Some(since) = self.waiting_since {
+            self.waiting += now - since;
+            self.longest_wait = self.longest_wait.max(now - since);
+        }
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let line = format!(
+            "Ruffle Together timing: {:.1} fps (game {:.0}), {} ticks, longest tick gap {:.0} ms, \
+             frame cost avg {:.1} / max {:.0} ms, waited for input {:.0} ms of {:.0} (longest {:.0} ms)",
+            self.frames as f64 / span.as_secs_f64(),
+            frame_rate,
+            self.ticks,
+            ms(self.longest_tick_gap),
+            ms(self.step_total) / self.frames.max(1) as f64,
+            ms(self.step_longest),
+            ms(self.waiting),
+            ms(span),
+            ms(self.longest_wait),
+        );
+        let still_waiting = self.waiting_since.is_some();
+        *self = Self::new();
+        self.since = now;
+        self.last_tick = Some(now);
+        self.waiting_since = still_waiting.then_some(now);
+        Some(line)
+    }
 }
 
 fn hash_file(path: &Path) -> Result<String> {
@@ -306,6 +399,7 @@ impl Session {
             next_due: None,
             taken_at: HashMap::new(),
             felt_delay: vec![],
+            timing: Timing::new(),
             state: SessionState::default(),
         })
     }
@@ -410,6 +504,7 @@ impl Session {
         }
 
         let now = Instant::now();
+        self.timing.tick(now);
         let frame_time = Duration::from_secs_f64(1.0 / player.frame_rate());
         for _ in 0..MAX_CATCH_UP {
             // paced: a frame runs when it is due by this PC's clock; a PC that fell behind
@@ -427,9 +522,13 @@ impl Session {
                 self.local_sent += 1;
             }
             let Some(inputs) = self.lockstep.ready() else {
+                self.timing.waiting(now, true);
                 break;
             };
+            self.timing.waiting(now, false);
+            let step_started = Instant::now();
             self.stepper.step(player, &inputs);
+            self.timing.step(step_started.elapsed());
             // after a long stall, don't sprint through more than the catch-up allows
             self.next_due = Some((due + frame_time).max(now - frame_time * MAX_CATCH_UP));
             let frame = self.lockstep.frame();
@@ -451,6 +550,9 @@ impl Session {
             }
         }
 
+        if let Some(line) = self.timing.report(Instant::now(), player.frame_rate()) {
+            tracing::info!("{line}");
+        }
         let stalled = self.last_frame_at.elapsed();
         self.state.waiting_on = if stalled > SHOW_WAITING {
             self.lockstep.waiting_on().into_iter().map(|p| self.name(p)).collect()
@@ -665,7 +767,7 @@ mod tests {
 
     #[test]
     fn build_id_names_this_release() {
-        assert!(build_id().starts_with("rc-1.0.0#"), "{}", build_id());
+        assert!(build_id().starts_with("rc-1.0.1#"), "{}", build_id());
         // the relay keeps 32 characters of a version
         assert!(build_id().len() <= 32);
     }
