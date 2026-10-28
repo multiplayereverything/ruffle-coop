@@ -61,3 +61,7 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   ruffle-coop latest/min 1.0.1, protocol rc-1.0.1 (pushed from a fresh clone; the global-mods-server/mods-info clone
   has other sessions' uncommitted work and was left alone). Asked the Multiplayer Mods Launcher session to update
   installs that already have 1.0.0 (its installer only fetches when ruffle_desktop.exe is missing).
+- Launcher 1.0.33 (launcher session, verified as latest release): updates an installed Ruffle Together to the newest
+  ruffle-coop release on open (SHA-256 checked, records players\ruffle-together\.version; a 1.0.0 copy without it
+  updates once). Its test took 1.0.0 to v1.0.1 from the real release. 1.0.32 had fixed joining a Bad Ice-Cream room
+  (room code was passed as a -P FlashVar -> host refused the friend for different player settings).
