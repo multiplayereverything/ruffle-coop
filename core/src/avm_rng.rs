@@ -15,6 +15,11 @@ pub struct AvmRng {
 }
 
 impl AvmRng {
+    /// The generator's internal state (0 until first use), for Ruffle Together's sync check.
+    pub fn state(&self) -> u32 {
+        self.u_value
+    }
+
     fn init_with_seed(&mut self, seed: u32) {
         self.u_value = seed;
     }
@@ -63,4 +68,18 @@ impl AvmRng {
 // https://github.com/adobe-flash/avmplus/blob/65a05927767f3735db37823eebf7d743531f5d37/VMPI/PosixSpecificUtils.cpp#L18
 fn get_seed(locale: &dyn LocaleBackend) -> u32 {
     locale.get_current_date_time().timestamp_micros() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::locale::DeterministicLocaleBackend;
+
+    #[test]
+    fn rng_state_reports_u_value() {
+        let mut rng = AvmRng::default();
+        assert_eq!(rng.state(), 0);
+        rng.generate_random_number(&DeterministicLocaleBackend::default());
+        assert_ne!(rng.state(), 0);
+    }
 }

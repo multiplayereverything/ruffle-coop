@@ -26,6 +26,7 @@ mod ecma_conversions;
 pub mod events;
 pub mod focus_tracker;
 pub mod font;
+pub mod coop_fingerprint;
 pub mod frame_clock;
 mod frame_lifecycle;
 pub mod fte;

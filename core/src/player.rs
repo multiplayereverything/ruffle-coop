@@ -956,6 +956,11 @@ impl Player {
         self.frame_clock = clock;
     }
 
+    /// Ruffle Together: a fingerprint of the game's state, equal on every PC while in sync.
+    pub fn coop_fingerprint(&mut self) -> u64 {
+        self.mutate_with_update_context(crate::coop_fingerprint::fingerprint)
+    }
+
     /// Moves the frame clock by one frame; does nothing outside a session.
     pub fn advance_frame_clock(&mut self, frame: Duration) {
         if let Some(clock) = &self.frame_clock
