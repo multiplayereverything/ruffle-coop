@@ -65,3 +65,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   ruffle-coop release on open (SHA-256 checked, records players\ruffle-together\.version; a 1.0.0 copy without it
   updates once). Its test took 1.0.0 to v1.0.1 from the real release. 1.0.32 had fixed joining a Bad Ice-Cream room
   (room code was passed as a -P FlashVar -> host refused the friend for different player settings).
+- First real two-PC log (1.0.1, host = this PC, RTX 3080, over Radmin VPN 26.x; friend's ping to host 9-11 ms):
+  host steady 30.0 fps, its own frame cost avg 0.4-12 ms (one 154 ms hitch), event-loop gaps <= 34 ms, but it
+  waited for the friend's input 100% of the time (longest 37-52 ms, 393 ms at start). The host runs each frame
+  as soon as the friend's input arrives, so its picture follows the friend's PC and the network. Friend's log not
+  yet received.
