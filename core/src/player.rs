@@ -375,6 +375,10 @@ pub struct Player {
     mouse_in_stage: bool,
     mouse_position: Point<Twips>,
 
+    /// Ruffle Together: mouse events take this stage position as is, instead of mapping their
+    /// window position through this PC's window size (which differs between PCs).
+    stage_mouse_override: Option<Point<Twips>>,
+
     /// The current mouse cursor icon.
     mouse_cursor: MouseCursor,
     mouse_cursor_needs_check: bool,
@@ -656,6 +660,17 @@ impl Player {
 
     pub fn set_mouse_in_stage(&mut self, is_in: bool) {
         self.mouse_in_stage = is_in;
+    }
+
+    /// Ruffle Together: the next mouse events are at this stage position (twips), exactly.
+    pub fn set_stage_mouse_override(&mut self, position: Option<(i32, i32)>) {
+        self.stage_mouse_override =
+            position.map(|(x, y)| Point::new(Twips::new(x), Twips::new(y)));
+    }
+
+    /// Where the game sees the mouse, in stage twips.
+    pub fn mouse_position_twips(&self) -> (i32, i32) {
+        (self.mouse_position.x.get(), self.mouse_position.y.get())
     }
 
     pub fn mouse_cursor(&self) -> MouseCursor {
@@ -1457,7 +1472,9 @@ impl Player {
             let inverse_view_matrix =
                 self.mutate_with_update_context(|context| context.stage.inverse_view_matrix());
             let prev_mouse_position = self.mouse_position;
-            self.mouse_position = inverse_view_matrix * Point::from_pixels(x, y);
+            self.mouse_position = self
+                .stage_mouse_override
+                .unwrap_or_else(|| inverse_view_matrix * Point::from_pixels(x, y));
 
             // Update the dragged object here to keep it constantly in sync with the mouse position.
             self.mutate_with_update_context(|context| {
@@ -3155,6 +3172,7 @@ impl PlayerBuilder {
                 input: InputManager::new(self.gamepad_button_mapping),
                 mouse_in_stage: true,
                 mouse_position: Point::ZERO,
+                stage_mouse_override: None,
                 mouse_cursor: MouseCursor::Arrow,
                 mouse_cursor_needs_check: false,
 

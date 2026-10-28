@@ -12,7 +12,6 @@ use rand::RngExt;
 use ruffle_core::backend::locale::DefaultLocaleBackend;
 use ruffle_core::backend::navigator::NullNavigatorBackend;
 use ruffle_core::frame_clock::{FrameClock, FrameClockLocale};
-use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::movie_from_path;
 use ruffle_core::{Player, PlayerBuilder};
 use ruffle_render_wgpu::backend::{WgpuRenderBackend, create_wgpu_instance, request_adapter_and_device};
@@ -75,7 +74,7 @@ impl Replay<'_> {
     }
 }
 
-/// A windowless player for `swf`, loaded and ready for its first frame. With a frame clock it
+/// A windowless player for `swf` (the first `Stepper::step` loads it fully). With a frame clock it
 /// runs as in a session (getTimer, Date and Math.random follow the clock); without, as upstream.
 pub fn headless_player(
     swf: &Path,
@@ -102,11 +101,7 @@ pub fn headless_player(
         None => builder.with_locale(DefaultLocaleBackend::new()),
     };
     let player = builder.build();
-    {
-        let mut locked = player.lock().map_err(|_| anyhow!("player lock"))?;
-        locked.set_frame_clock(clock);
-        while !locked.preload(&mut ExecutionLimit::none()) {}
-    }
+    player.lock().map_err(|_| anyhow!("player lock"))?.set_frame_clock(clock);
     Ok(player)
 }
 
