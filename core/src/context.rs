@@ -185,6 +185,9 @@ pub struct UpdateContext<'gc> {
     /// The instant at which the SWF was launched.
     pub start_time: Instant,
 
+    /// Ruffle Together: the frame clock's time, fixed for this update. None outside a session.
+    pub frame_clock_elapsed: Option<Duration>,
+
     /// The instant at which the current update started.
     pub update_start: Instant,
 
@@ -245,6 +248,15 @@ impl<'gc> HasStringContext<'gc> for UpdateContext<'gc> {
     #[inline(always)]
     fn strings_ref(&self) -> &StringContext<'gc> {
         &self.strings
+    }
+}
+
+impl<'gc> UpdateContext<'gc> {
+    /// Time since the SWF started, as getTimer sees it: the frame clock in a Ruffle Together
+    /// session (the same on every PC), the real clock otherwise.
+    pub fn elapsed_since_start(&self) -> Duration {
+        self.frame_clock_elapsed
+            .unwrap_or_else(|| Instant::now().duration_since(self.start_time))
     }
 }
 

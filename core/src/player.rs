@@ -70,6 +70,7 @@ use ruffle_render::commands::CommandList;
 use ruffle_render::quality::StageQuality;
 use ruffle_render::transform::TransformStack;
 use ruffle_video::backend::VideoBackend;
+use crate::frame_clock::FrameClock;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -390,6 +391,10 @@ pub struct Player {
 
     /// The instant at which the SWF was launched.
     start_time: Instant,
+
+    /// Ruffle Together: when set, getTimer reads this clock (moved one frame at a time by the
+    /// session) instead of the real clock. None outside a session.
+    frame_clock: Option<Arc<Mutex<FrameClock>>>,
 
     /// The maximum amount of time that can be called before a `Error::ExecutionTimeout`
     /// is raised. This defaults to 15 seconds but can be changed.
@@ -943,6 +948,21 @@ impl Player {
         } else {
             RunState::Suspended
         });
+    }
+
+    /// Ruffle Together: getTimer follows `clock` (shared with a `FrameClockLocale`, so Date and
+    /// the Math.random seed follow it too). None restores the real clock.
+    pub fn set_frame_clock(&mut self, clock: Option<Arc<Mutex<FrameClock>>>) {
+        self.frame_clock = clock;
+    }
+
+    /// Moves the frame clock by one frame; does nothing outside a session.
+    pub fn advance_frame_clock(&mut self, frame: Duration) {
+        if let Some(clock) = &self.frame_clock
+            && let Ok(mut clock) = clock.lock()
+        {
+            clock.advance(frame);
+        }
     }
 
     pub fn suspend_after_next_frame(&mut self) {
@@ -2364,6 +2384,10 @@ impl Player {
                 avm2,
                 external_interface,
                 start_time: this.start_time,
+                frame_clock_elapsed: this
+                    .frame_clock
+                    .as_ref()
+                    .and_then(|clock| clock.lock().ok().map(|clock| clock.elapsed())),
                 update_start: Instant::now(),
                 max_execution_duration: this.max_execution_duration,
                 focus_tracker: stage.focus_tracker(),
@@ -3096,6 +3120,7 @@ impl PlayerBuilder {
                 frame_accumulator: FloatDuration::ZERO,
                 recent_run_frame_timings: VecDeque::with_capacity(10),
                 start_time: Instant::now(),
+                frame_clock: None,
                 time_offset: 0,
                 time_til_next_timer: None,
                 max_execution_duration: self.max_execution_duration,
