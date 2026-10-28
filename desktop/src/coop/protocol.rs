@@ -12,15 +12,18 @@ pub enum Msg {
         /// The player settings that change how a game behaves (frame rate, Flash version, ...).
         settings: String,
         name: String,
+        /// A random number naming this player until the start (0: the host); through the relay
+        /// a friend doesn't know its connection number.
+        id: u64,
     },
-    /// Host to everyone: what both games need to start identically.
+    /// Host to everyone: what every game needs to start identically.
     Start {
-        player_count: u8,
-        your_index: u8,
         delay: u32,
         start_unix_ms: i64,
         frame_rate_milli: u32,
         save: Vec<u8>,
+        /// Every player in slot order (the host first): their Hello id and name.
+        players: Vec<(u64, String)>,
     },
     Input {
         player: u8,
@@ -30,7 +33,8 @@ pub enum Msg {
     /// The game's fingerprint at a frame, for the sync check.
     Print { player: u8, frame: u32, hash: u64 },
     Bye { player: u8, reason: String },
-    Refuse { reason: String },
+    /// Host to the joiner with this Hello id (the others hear it too and ignore it).
+    Refuse { id: u64, reason: String },
     /// Host to a friend before the start: the round trip picks the input delay.
     Ping { seq: u32 },
     Pong { seq: u32 },
@@ -50,23 +54,27 @@ pub fn encode(msg: &Msg) -> String {
             swf_sha256,
             settings,
             name,
+            id,
         } => format!(
-            "HI|{}|{}|{}|{}",
+            "HI|{}|{}|{}|{}|{id:x}",
             clean(build),
             clean(swf_sha256),
             clean(settings),
             clean(name)
         ),
         Msg::Start {
-            player_count,
-            your_index,
             delay,
             start_unix_ms,
             frame_rate_milli,
             save,
+            players,
         } => {
             let hex: String = save.iter().map(|b| format!("{b:02x}")).collect();
-            format!("ST|{player_count}|{your_index}|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}")
+            let players: Vec<String> = players
+                .iter()
+                .map(|(id, name)| format!("{id:x}:{}", clean(name).replace(',', " ")))
+                .collect();
+            format!("ST|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}|{}", players.join(","))
         }
         Msg::Input {
             player,
@@ -84,7 +92,7 @@ pub fn encode(msg: &Msg) -> String {
             hash,
         } => format!("FP|{player}|{frame}|{hash:016x}"),
         Msg::Bye { player, reason } => format!("BY|{player}|{}", clean(reason)),
-        Msg::Refuse { reason } => format!("NO|{}", clean(reason)),
+        Msg::Refuse { id, reason } => format!("NO|{id:x}|{}", clean(reason)),
         Msg::Ping { seq } => format!("PI|{seq}"),
         Msg::Pong { seq } => format!("PO|{seq}"),
     }
@@ -106,17 +114,18 @@ pub fn decode(line: &str) -> Result<Msg, String> {
     };
     match parts[0] {
         "HI" => {
-            want(5)?;
+            want(6)?;
             Ok(Msg::Hello {
                 build: text(1)?,
                 swf_sha256: text(2)?,
                 settings: text(3)?,
                 name: text(4)?,
+                id: u64::from_str_radix(parts[5], 16).map_err(|_| bad())?,
             })
         }
         "ST" => {
-            want(7)?;
-            let hex = parts[6];
+            want(6)?;
+            let hex = parts[4];
             if !hex.len().is_multiple_of(2) {
                 return Err(bad());
             }
@@ -125,13 +134,21 @@ pub fn decode(line: &str) -> Result<Msg, String> {
                 .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
                 .collect::<Result<Vec<u8>, _>>()
                 .map_err(|_| bad())?;
+            let players = parts[5]
+                .split(',')
+                .map(|player| {
+                    let (id, name) = player.split_once(':')?;
+                    Some((u64::from_str_radix(id, 16).ok()?, name.to_string()))
+                })
+                .collect::<Option<Vec<_>>>()
+                .filter(|players| (1..=crate::coop::lockstep::MAX_PLAYERS).contains(&players.len()))
+                .ok_or_else(bad)?;
             Ok(Msg::Start {
-                player_count: byte(1)?,
-                your_index: byte(2)?,
-                delay: uint(3)?,
-                start_unix_ms: num(4)?,
-                frame_rate_milli: uint(5)?,
+                delay: uint(1)?,
+                start_unix_ms: num(2)?,
+                frame_rate_milli: uint(3)?,
                 save,
+                players,
             })
         }
         "IN" => {
@@ -166,8 +183,11 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             })
         }
         "NO" => {
-            want(2)?;
-            Ok(Msg::Refuse { reason: text(1)? })
+            want(3)?;
+            Ok(Msg::Refuse {
+                id: u64::from_str_radix(parts[1], 16).map_err(|_| bad())?,
+                reason: text(2)?,
+            })
         }
         "PI" => {
             want(2)?;
@@ -199,22 +219,21 @@ mod tests {
             swf_sha256: "4635ddfc".into(),
             settings: "frame_rate=None; quality=None".into(),
             name: "Liam".into(),
+            id: u64::MAX,
         });
         roundtrip(Msg::Start {
-            player_count: 2,
-            your_index: 1,
             delay: 3,
             start_unix_ms: 1_700_000_000_000,
             frame_rate_milli: 25_000,
             save: vec![0, 1, 254, 255],
+            players: vec![(0, "Liam".into()), (77, "Sam".into())],
         });
         roundtrip(Msg::Start {
-            player_count: 4,
-            your_index: 3,
             delay: 0,
             start_unix_ms: -5,
             frame_rate_milli: 30_000,
             save: vec![],
+            players: vec![(0, String::new()), (1, "a:b".into()), (2, "c".into()), (3, "d".into())],
         });
         roundtrip(Msg::Input {
             player: 1,
@@ -242,6 +261,7 @@ mod tests {
             reason: "closed the game".into(),
         });
         roundtrip(Msg::Refuse {
+            id: 0xabc,
             reason: "different game file".into(),
         });
         roundtrip(Msg::Ping { seq: 4 });
@@ -254,7 +274,9 @@ mod tests {
         assert!(decode("IN|0|1").is_err());
         assert!(decode("ZZ|1").is_err());
         assert!(decode("").is_err());
-        assert!(decode("ST|2|1|3|0|25000|zz").is_err());
+        assert!(decode("ST|3|0|25000|zz|0:a").is_err());
+        assert!(decode("ST|3|0|25000||").is_err(), "no players");
+        assert!(decode("ST|3|0|25000||x:a").is_err());
     }
 
     #[test]
@@ -264,6 +286,7 @@ mod tests {
             swf_sha256: "s".into(),
             settings: String::new(),
             name: "a|b\nc\0d".into(),
+            id: 1,
         });
         assert_eq!(
             decode(&line),
@@ -272,7 +295,17 @@ mod tests {
                 swf_sha256: "s".into(),
                 settings: String::new(),
                 name: "a b c d".into(),
+                id: 1,
             })
         );
+        // the player list in Start is split on commas
+        let line = encode(&Msg::Start {
+            delay: 1,
+            start_unix_ms: 0,
+            frame_rate_milli: 0,
+            save: vec![],
+            players: vec![(0, "x,y".into())],
+        });
+        assert!(matches!(decode(&line), Ok(Msg::Start { players, .. }) if players == vec![(0, "x y".into())]));
     }
 }

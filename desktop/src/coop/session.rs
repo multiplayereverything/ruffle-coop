@@ -2,7 +2,7 @@
 //! players, a sync check every 25 frames, and what happens when someone leaves.
 
 use crate::coop::frame::Stepper;
-use crate::coop::keymap::{GameKeys, local_buttons};
+use crate::coop::keymap::{Game, local_buttons};
 use crate::coop::lockstep::{InputFrame, Lockstep};
 use crate::coop::net::{Event, Link, Role, connect};
 use crate::coop::protocol::Msg;
@@ -18,8 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// v1 plays 2 PCs (the code is ready for up to 4).
-const PLAYERS: u8 = 2;
 /// The sync check runs every this many frames.
 const CHECK_EVERY: u32 = 25;
 /// Most frames run in one tick when catching up after a stall.
@@ -40,9 +38,13 @@ pub fn build_id() -> String {
 pub struct SessionOpts {
     pub role: Role,
     pub name: String,
+    /// Host: how many players the game starts with (2-4); it waits until all have joined.
+    pub players: u8,
     /// Input delay in frames (host only; the friend uses the host's); None picks it from the ping.
     pub delay: Option<u32>,
     pub swf: PathBuf,
+    /// Whose keys the inputs press.
+    pub game: Game,
     /// Ruffle's save folder: the host shares its saves for this game.
     pub save_dir: Option<PathBuf>,
     /// Testing: input from a script instead of the keyboard and mouse.
@@ -103,6 +105,7 @@ pub struct Session {
     link: Link,
     lockstep: Lockstep,
     stepper: Stepper,
+    game: Game,
     local_index: u8,
     names: Vec<String>,
     /// Connection number -> player slot of the session's players (see `from` in net events).
@@ -317,25 +320,34 @@ fn swf_frame_time(path: &Path) -> Result<Duration> {
     Ok(Duration::from_secs_f64(1.0 / rate))
 }
 
-/// Host: the worst round trip to `friend` over a few pings, None if it doesn't answer.
-fn measure_ping(link: &Link, friend: u8) -> Option<Duration> {
-    let mut worst = Duration::ZERO;
+/// Host: each friend's worst round trip over a few pings, None if one doesn't answer.
+fn measure_ping(link: &Link, friends: &[u8]) -> Option<Vec<Duration>> {
+    let mut worst: HashMap<u8, Duration> = HashMap::new();
     for seq in 0..PINGS {
         let sent = Instant::now();
         link.send(&Msg::Ping { seq });
-        loop {
+        let mut waiting: HashSet<u8> = friends.iter().copied().collect();
+        while !waiting.is_empty() {
             let left = Duration::from_secs(2).checked_sub(sent.elapsed())?;
             match next_event(link, left) {
-                Some(Event::Msg { from, msg: Msg::Pong { seq: s } }) if from == friend && s == seq => {
-                    worst = worst.max(sent.elapsed());
-                    break;
+                Some(Event::Msg { from, msg: Msg::Pong { seq: s } }) if s == seq && waiting.remove(&from) => {
+                    let ping = worst.entry(from).or_default();
+                    *ping = (*ping).max(sent.elapsed());
                 }
                 Some(_) => {}
                 None => return None,
             }
         }
     }
-    Some(worst)
+    Some(friends.iter().map(|f| worst[f]).collect())
+}
+
+/// The longest trip a player's keys take: to the host and back with one friend; with more, a
+/// friend's keys reach another friend through the host, so the two worst pings added.
+fn path_ping(pings: &[Duration]) -> Duration {
+    let mut pings = pings.to_vec();
+    pings.sort_by(|a, b| b.cmp(a));
+    pings.iter().take(2).sum()
 }
 
 fn hash_file(path: &Path) -> Result<String> {
@@ -376,7 +388,10 @@ impl Session {
             tracing::info!("Ruffle Together: room code {code}");
             println!("Ruffle Together room code: {code}");
             if opts.dialogs {
-                let text = format!("Your room code is {code}\n\nTell your friend; the game starts when they join.");
+                let text = format!(
+                    "Your room code is {code}\n\nTell your friends; the game starts when {} more joined.",
+                    opts.players.saturating_sub(1)
+                );
                 std::thread::spawn(move || {
                     let _ = rfd::MessageDialog::new()
                         .set_title("Ruffle Together")
@@ -386,11 +401,14 @@ impl Session {
             }
         }
         let settings = opts.settings.replace('|', " ");
+        // the host is 0; a friend picks a random id that names it until the start
+        let my_id = if hosting { 0 } else { rand::random::<u64>() | 1 };
         let me = Msg::Hello {
             build: build.clone(),
             swf_sha256: swf_sha256.clone(),
             settings: settings.clone(),
             name: opts.name.clone(),
+            id: my_id,
         };
         let mismatch = |their_build: &str, their_swf: &str, their_settings: &str| {
             if their_build != build {
@@ -403,89 +421,97 @@ impl Session {
             }
         };
 
-        let start = if hosting {
+        let (start, peers) = if hosting {
             let deadline = opts.host_wait.map(|wait| Instant::now() + wait);
-            loop {
+            // accepted friends in join order: connection, Hello id, name
+            let mut friends: Vec<(u8, u64, String)> = vec![];
+            while friends.len() + 1 < opts.players as usize {
                 let left = deadline.map_or(Duration::from_secs(3600), |d| {
                     d.saturating_duration_since(Instant::now())
                 });
                 if left.is_zero() {
-                    bail!("no friend joined");
+                    bail!("not everyone joined ({} of {} players)", friends.len() + 1, opts.players);
                 }
                 match next_event(&link, left.min(Duration::from_millis(500))) {
                     Some(Event::Msg {
                         from,
-                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, name },
+                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, name, id },
                     }) => {
                         if let Some(reason) = mismatch(&b, &s, &o) {
                             tracing::warn!("Ruffle Together: refused {name}: {reason}");
-                            link.send(&Msg::Refuse { reason });
+                            link.send(&Msg::Refuse { id, reason });
                             continue;
                         }
-                        let save = match &opts.save_dir {
-                            Some(dir) => SessionStorage::export_from_disk(
-                                dir,
-                                &opts.swf.file_name().unwrap_or_default().to_string_lossy(),
-                            ),
-                            None => vec![],
-                        };
-                        // the game starts: only this friend stays connected, and nobody new
-                        link.keep_only(&[from]);
-                        link.stop_accepting();
-                        let delay = match opts.delay {
-                            Some(delay) => delay,
-                            None => match (measure_ping(&link, from), swf_frame_time(&opts.swf)) {
-                                (Some(ping), Ok(frame)) => {
-                                    let delay = auto_delay(ping, frame);
-                                    tracing::info!(
-                                        "Ruffle Together: ping {} ms, input delay {delay} frames",
-                                        ping.as_millis()
-                                    );
-                                    delay
-                                }
-                                _ => {
-                                    tracing::warn!("Ruffle Together: no ping answer, input delay {FALLBACK_DELAY} frames");
-                                    FALLBACK_DELAY
-                                }
-                            },
-                        };
-                        let start = Msg::Start {
-                            player_count: PLAYERS,
-                            // the friend's player slot (not its connection number: a refused
-                            // or stray connection must not shift it)
-                            your_index: 1,
-                            // a frame's own input is read one frame ahead at the latest
-                            delay: delay.max(1),
-                            start_unix_ms: now_unix_ms(),
-                            frame_rate_milli: 0,
-                            save,
-                        };
-                        link.send(&me);
-                        link.send(&start);
-                        break (start, vec![opts.name.clone(), name], from);
+                        friends.retain(|(conn, ..)| *conn != from);
+                        friends.push((from, id, name));
                     }
+                    Some(Event::Left { player: conn }) => friends.retain(|(c, ..)| *c != conn),
                     Some(Event::Closed(reason)) => bail!("{reason}"),
                     _ => {}
                 }
             }
+            let save = match &opts.save_dir {
+                Some(dir) => SessionStorage::export_from_disk(
+                    dir,
+                    &opts.swf.file_name().unwrap_or_default().to_string_lossy(),
+                ),
+                None => vec![],
+            };
+            // the game starts: only these friends stay connected, and nobody new
+            let conns: Vec<u8> = friends.iter().map(|(conn, ..)| *conn).collect();
+            link.keep_only(&conns);
+            link.stop_accepting();
+            let delay = match opts.delay {
+                Some(delay) => delay,
+                None => match (measure_ping(&link, &conns), swf_frame_time(&opts.swf)) {
+                    (Some(pings), Ok(frame)) => {
+                        let ping = path_ping(&pings);
+                        let delay = auto_delay(ping, frame);
+                        tracing::info!(
+                            "Ruffle Together: ping {} ms, input delay {delay} frames",
+                            ping.as_millis()
+                        );
+                        delay
+                    }
+                    _ => {
+                        tracing::warn!("Ruffle Together: no ping answer, input delay {FALLBACK_DELAY} frames");
+                        FALLBACK_DELAY
+                    }
+                },
+            };
+            let mut players = vec![(0, opts.name.clone())];
+            players.extend(friends.iter().map(|(_, id, name)| (*id, name.clone())));
+            let start = Msg::Start {
+                // a frame's own input is read one frame ahead at the latest
+                delay: delay.max(1),
+                start_unix_ms: now_unix_ms(),
+                frame_rate_milli: 0,
+                save,
+                players,
+            };
+            link.send(&me);
+            link.send(&start);
+            // the host knows its friends by connection number; their slots follow join order
+            let peers = conns.iter().enumerate().map(|(i, conn)| (*conn, i as u8 + 1)).collect();
+            (start, peers)
         } else {
             link.send(&me);
-            let mut host_name = String::new();
             loop {
                 match next_event(&link, Duration::from_secs(30)) {
-                    Some(Event::Msg { msg: Msg::Refuse { reason }, .. }) => bail!("{reason}"),
+                    Some(Event::Msg { msg: Msg::Refuse { id, reason }, .. }) if id == my_id => bail!("{reason}"),
+                    // only the host's Hello (id 0) is checked: the host passes the other friends' on
                     Some(Event::Msg {
-                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, name },
+                        msg: Msg::Hello { build: b, swf_sha256: s, settings: o, id: 0, .. },
                         ..
                     }) => {
                         if let Some(reason) = mismatch(&b, &s, &o) {
                             bail!("{reason}");
                         }
-                        host_name = name;
                     }
                     Some(Event::Msg { msg: Msg::Ping { seq }, .. }) => link.send(&Msg::Pong { seq }),
                     Some(Event::Msg { msg: start @ Msg::Start { .. }, .. }) => {
-                        break (start, vec![host_name, opts.name.clone()], 0);
+                        // a friend hears everything from the host
+                        break (start, HashMap::from([(0, 0)]));
                     }
                     Some(Event::Closed(reason)) => bail!("{reason}"),
                     Some(_) => {}
@@ -494,14 +520,16 @@ impl Session {
             }
         };
 
-        let (Msg::Start { player_count, your_index, delay, start_unix_ms, save, .. }, names, peer) =
-            start
-        else {
+        let Msg::Start { delay, start_unix_ms, save, players, .. } = start else {
             unreachable!("start is always a Start message");
         };
+        let player_count = players.len() as u8;
+        let your_index = players
+            .iter()
+            .position(|(id, _)| *id == my_id)
+            .ok_or_else(|| anyhow!("the game started without you (the room is full)"))? as u8;
+        let names = players.into_iter().map(|(_, name)| name).collect();
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
-        // the Start message names the friend's slot; the host is always player 0
-        let your_index = if hosting { 0 } else { your_index };
         tracing::info!(
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
             your_index + 1
@@ -509,10 +537,10 @@ impl Session {
         Ok(Session {
             link,
             lockstep: Lockstep::new(player_count, your_index, delay),
-            stepper: Stepper::new(GameKeys::bad_ice_cream()),
+            stepper: Stepper::new(opts.game.keys()),
+            game: opts.game,
             local_index: your_index,
-            // the host knows its friend by connection number; a friend hears everything from the host
-            peers: HashMap::from([(peer, if hosting { 1 } else { 0 })]),
+            peers,
             hosting,
             names,
             room,
@@ -585,7 +613,7 @@ impl Session {
             return script.input(self.local_sent as usize, self.local_index as usize);
         }
         InputFrame {
-            buttons: if self.focused { local_buttons(&self.held) } else { 0 },
+            buttons: if self.focused { local_buttons(self.game, &self.held) } else { 0 },
             mouse: if self.local_index == 0 { self.mouse } else { None },
         }
     }
@@ -884,8 +912,10 @@ mod tests {
         SessionOpts {
             role,
             name: "tester".into(),
+            players: 2,
             delay: Some(3),
             swf: swf.to_path_buf(),
+            game: Game::BadIceCream,
             save_dir: None,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
@@ -1114,6 +1144,53 @@ mod tests {
         let (host_state, _) = host.join().expect("host");
         assert!(host_state.closed.is_some(), "host still waiting");
         assert!(left_at.elapsed() < Duration::from_secs(6));
+    }
+
+    /// A friend's keys reach another friend through the host: that trip is the two friends' pings
+    /// added (3 players at ~90 ms ping ran 26 s for 20 s of game on the single worst ping).
+    #[test]
+    fn friend_to_friend_trips_count_both_pings() {
+        let ms = Duration::from_millis;
+        assert_eq!(path_ping(&[ms(40)]), ms(40), "one friend: its own ping");
+        assert_eq!(path_ping(&[ms(40), ms(90), ms(60)]), ms(150), "the two worst, added");
+    }
+
+    /// Four PCs (host + 3 friends): the host waits for all three, each gets its own slot, and
+    /// every game runs the same.
+    #[test]
+    fn four_players_stay_in_sync() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let four = |mut o: SessionOpts| {
+            o.players = 4;
+            o.game = Game::GunMayhem2;
+            o
+        };
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(four(opts(Role::HostDirect { port }, &host_swf, 0)), 300, None));
+        thread::sleep(Duration::from_millis(300));
+        let friends: Vec<_> = (0..3)
+            .map(|i| {
+                let swf = swf.clone();
+                thread::sleep(Duration::from_millis(100 * i));
+                thread::spawn(move || {
+                    let addr = format!("127.0.0.1:{port}");
+                    play(four(opts(Role::JoinDirect { addr }, &swf, 0)), 300, None)
+                })
+            })
+            .collect();
+        let mut all = vec![host.join().expect("host")];
+        all.extend(friends.into_iter().map(|f| f.join().expect("friend")));
+        let mut slots: Vec<u8> = all.iter().map(|(_, s)| s.local_index).collect();
+        slots.sort();
+        assert_eq!(slots, vec![0, 1, 2, 3], "each PC its own player slot");
+        let host_prints = &all[0].1.my_prints;
+        assert!(host_prints.len() >= 10, "sync checks ran");
+        for (state, session) in &all {
+            assert_eq!(state.desync_at, None);
+            assert_eq!(state.closed, None);
+            assert_eq!(&session.my_prints, host_prints, "player {}", session.local_index + 1);
+        }
     }
 
     #[test]

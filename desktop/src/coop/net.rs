@@ -374,6 +374,7 @@ mod tests {
             swf_sha256: "abc".into(),
             settings: String::new(),
             name: name.into(),
+            id: 1,
         }
     }
 

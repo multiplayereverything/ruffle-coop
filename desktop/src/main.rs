@@ -221,12 +221,19 @@ fn main() -> Result<(), Error> {
             name: coop.coop_name.clone(),
             delay: coop.coop_delay,
             swf: swf.clone(),
+            game: coop.game()?,
+            players: coop.players()?,
             save_dir: Some(preferences.cli.save_directory.clone()),
             script,
             host_wait: None,
             start_skew_ms: 0,
             paced: true,
-            settings: coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
+            // the keys must match too: a different key map is refused by name, not a desync
+            settings: format!(
+                "{}; keys={}",
+                coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
+                coop.game()?.name()
+            ),
             dialogs: !coop.coop_headless,
         });
         let session = match started {

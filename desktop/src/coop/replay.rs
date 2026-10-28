@@ -4,7 +4,7 @@
 
 use crate::coop::CoopOpt;
 use crate::coop::frame::Stepper;
-use crate::coop::keymap::GameKeys;
+use crate::coop::keymap::Game;
 use crate::coop::script::Script;
 use crate::coop::storage::SessionStorage;
 use anyhow::{Context, Result, anyhow};
@@ -25,6 +25,7 @@ use std::time::Duration;
 pub struct Replay<'a> {
     pub swf: &'a Path,
     pub script: &'a Script,
+    pub game: Game,
     pub frames: u32,
     pub jitter_ms: u64,
     /// false: the real clock, as upstream Ruffle (the control run).
@@ -47,12 +48,13 @@ impl Replay<'_> {
         )?;
         let mut player = player.lock().map_err(|_| anyhow!("player lock"))?;
 
-        let mut stepper = Stepper::new(GameKeys::bad_ice_cream());
+        let mut stepper = Stepper::new(self.game.keys());
         let mut rng = rand::rng();
         let mut prints = Vec::with_capacity(self.frames as usize);
         for frame in 0..self.frames {
             let f = frame as usize;
-            let inputs = [self.script.input(f, 0), self.script.input(f, 1)];
+            let inputs: Vec<_> =
+                (0..self.game.max_players() as usize).map(|p| self.script.input(f, p)).collect();
             stepper.step(&mut player, &inputs);
             prints.push(player.coop_fingerprint());
             if let Ok(at) = std::env::var("COOP_DESCRIBE_AT")
@@ -142,6 +144,7 @@ pub fn run_cli(opt: &CoopOpt) -> Result<()> {
     let prints = Replay {
         swf,
         script: &script,
+        game: opt.game()?,
         frames: opt.coop_frames,
         jitter_ms: opt.coop_jitter_ms,
         frame_clock: !opt.coop_no_clock,
@@ -176,6 +179,7 @@ mod tests {
             Replay {
                 swf: Path::new(&swf),
                 script: &script,
+                game: Game::BadIceCream,
                 frames: 1000,
                 jitter_ms,
                 frame_clock: true,

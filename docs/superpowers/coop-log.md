@@ -105,3 +105,21 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
 - Release v1.0.2 (user asked for the best build to test with friends; earlier OK to publish 1.0.2): commit
   bf48ad2, tag v1.0.2, RuffleTogether-1.0.2-windows-x64.zip SHA-256 142190dd...755a, latest; re-downloaded, hash
   matches. mods-info c392a26: ruffle-coop latest/min 1.0.2, protocol rc-1.0.2. Launcher 1.0.33+ updates on open.
+- Gun Mayhem 2 + up to 4 players (user: "make gun mayhem 2 work", "it should work up to 4 players"). Asked the
+  "Gun Mayhem 2: modes and sync" session (local_aafeb7ce-4d41...) for a clean co-op SWF, its sync risks, a key answer
+  and a menu script. Here: --coop-keys bad-ice-cream|gun-mayhem-2 (Game enum; GM2 = its savedata2.controlarray
+  defaults: P1 arrows+Z/X, P2 WASD+T/Y, P3 numpad / 7 8 9 + * -, P4 numpad 5 1 2 3 + 0 .; numpad keys sent with
+  KeyLocation::Numpad so AS2 sees 96-111; locally Z/T shoot, X/Y grenade). keys=<game> joins the handshake's
+  player settings (mismatch refused by name). --coop-players N (2..game max). Protocol: Hello has a random id (host
+  0); Start lists every player (id:name) in slot order; Refuse names the joiner's id (it was sent to every friend,
+  which would kick accepted friends); friends only check the host's Hello. Host waits for N-1 friends, pings all.
+  Test four_players_stay_in_sync GREEN; mutation (host starts with 1 friend) -> FAIL. lab.py --players/--keys:
+  3 and 4 players direct 34 ms, relay 20 ms lag 67 ms, in sync. 3 players at 40 ms lag ran 26.4 s for 20 s on
+  the single worst ping: a friend's keys reach another friend via the host -> path_ping = two worst pings added
+  (test) -> 20.0 s, 134 ms. Live relay 4 players on this PC (room GFFW5): ping path 321 ms -> 6 frames, 200 ms,
+  in sync, full speed. Desktop tests 97/97.
+  GM2 session answer (read from decomp, nothing built: on hold until the user tells it): AS1 random(n) at 185
+  sites (covered: same AvmRng, seeded from the frame-clock locale); _quality changes particle spawns + pDepth
+  (covered: quality is a compared setting, no context menu in a session, save Q shared); Esc/Space/Home pause/quit
+  (never sent: only mapped keys); it will force controlarray defaults for all 4 slots in its build. Replay now feeds
+  as many players as the game has keys for. windows_lab PASS both modes, tests 97/97.

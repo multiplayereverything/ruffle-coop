@@ -5,7 +5,7 @@ relay with simulated lag (relay mode) or directly (direct mode), and prints each
 whether the games stayed in sync and how long inputs took to reach the game.
 
   python tools/coop-lab/lab.py --swf <BadIceCream_coop.swf> [--mode relay|direct|both]
-      [--frames 4500] [--lag 40] [--jitter 10] [--delay N]
+      [--frames 4500] [--lag 40] [--jitter 10] [--delay N] [--players 2] [--keys bad-ice-cream]
 
 Nothing touches the keyboard or mouse; test ports avoid the ones real games use.
 """
@@ -39,7 +39,7 @@ def free_port():
 def player(args, role_args, name, out):
     delay = ["--coop-delay", str(args.delay)] if args.delay is not None else []
     cmd = [RUFFLE, "--coop-headless", "--coop-frames", str(args.frames), "--coop-script", SCRIPT,
-           "--coop-name", name] + delay + role_args + [args.swf]
+           "--coop-name", name, "--coop-keys", args.keys, "--coop-players", str(args.players)] + delay + role_args + [args.swf]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     out[name] = {"proc": proc, "lines": []}
     return proc
@@ -82,18 +82,25 @@ def run(args, mode):
                 time.sleep(0.05)
             if not code:
                 return "no room code from the host: " + " | ".join(out["Host"]["lines"][-5:])
-            friend = player(args, ["--coop-join-relay", addr, "--coop-code", code[0]], "Friend", out)
+            join = ["--coop-join-relay", addr, "--coop-code", code[0]]
         else:
             port = free_port()
             host = player(args, ["--coop-host", str(port)], "Host", out)
             t = threading.Thread(target=read_lines, args=(out["Host"],), daemon=True)
             t.start()
             time.sleep(1.0)
-            friend = player(args, ["--coop-join", "127.0.0.1:%d" % port], "Friend", out)
-        read_lines(out["Friend"])
-        friend.wait(timeout=args.frames / 25 + 120)
+            join = ["--coop-join", "127.0.0.1:%d" % port]
+        names = ["Friend"] if args.players == 2 else ["Friend%d" % i for i in range(1, args.players)]
+        readers = []
+        for name in names:
+            player(args, join, name, out)
+            readers.append(threading.Thread(target=read_lines, args=(out[name],), daemon=True))
+            readers[-1].start()
+        for name in names:
+            out[name]["proc"].wait(timeout=args.frames / 25 + 120)
         host.wait(timeout=60)
-        t.join(timeout=5)
+        for reader in readers + [t]:
+            reader.join(timeout=5)
     finally:
         for entry in out.values():
             if entry["proc"].poll() is None:
@@ -115,10 +122,13 @@ def main():
     ap.add_argument("--lag", type=float, default=40, help="relay: one-way delay, ms")
     ap.add_argument("--jitter", type=float, default=10, help="relay: extra random delay 0..N ms")
     ap.add_argument("--delay", type=int, help="input delay, frames (default: the host picks it from the ping)")
+    ap.add_argument("--players", type=int, default=2, help="2-4 (3-4 need keys for that many, e.g. gun-mayhem-2)")
+    ap.add_argument("--keys", default="bad-ice-cream", help="--coop-keys for every player")
     args = ap.parse_args()
     for mode in (["relay", "direct"] if args.mode == "both" else [args.mode]):
         extra = " (lag %g ms one way + 0-%g ms jitter)" % (args.lag, args.jitter) if mode == "relay" else ""
-        print("== %s, %d frames, input delay %s%s" % (mode, args.frames, args.delay if args.delay is not None else "auto", extra))
+        print("== %s, %d players, %d frames, input delay %s%s" % (mode, args.players, args.frames,
+              args.delay if args.delay is not None else "auto", extra))
         print(run(args, mode))
         sys.stdout.flush()
 

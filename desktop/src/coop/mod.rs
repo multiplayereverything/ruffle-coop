@@ -59,6 +59,15 @@ pub struct CoopOpt {
     #[clap(long, help_heading = "Ruffle Together")]
     pub coop_delay: Option<u32>,
 
+    /// Host: how many players the game starts with, 2 to 4 (as many as the game has keys for);
+    /// it starts once all have joined.
+    #[clap(long, default_value_t = 2, help_heading = "Ruffle Together")]
+    pub coop_players: u8,
+
+    /// The game's keys: bad-ice-cream or gun-mayhem-2 (every player must use the same).
+    #[clap(long, default_value = "bad-ice-cream", help_heading = "Ruffle Together")]
+    pub coop_keys: String,
+
     /// Your name, shown to the other players.
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]
     pub coop_name: String,
@@ -98,6 +107,23 @@ pub struct CoopOpt {
 }
 
 impl CoopOpt {
+    /// The game named by --coop-keys.
+    pub fn game(&self) -> anyhow::Result<keymap::Game> {
+        keymap::Game::from_name(&self.coop_keys).ok_or_else(|| {
+            anyhow::anyhow!("--coop-keys: no keys for \"{}\" (known: {})", self.coop_keys, keymap::Game::NAMES.join(", "))
+        })
+    }
+
+    /// --coop-players, checked against the game's keys.
+    pub fn players(&self) -> anyhow::Result<u8> {
+        let game = self.game()?;
+        let max = game.max_players();
+        if !(2..=max).contains(&self.coop_players) {
+            anyhow::bail!("--coop-players: {} has keys for 2 to {max} players", game.name());
+        }
+        Ok(self.coop_players)
+    }
+
     /// The session these options ask for, if any.
     pub fn role(&self) -> anyhow::Result<Option<net::Role>> {
         use net::Role;
