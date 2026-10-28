@@ -1,5 +1,7 @@
 # Ruffle Together
 
+Version 1.0.0 (build id `rc-1.0.0#<commit>`; players must use the same build).
+
 Play a local-multiplayer Flash game online with a friend. Both PCs run the same game in this Ruffle build;
 only the key presses travel, and every frame runs on both PCs with both players' keys. Both players get
 the same small input delay (3 frames by default), and the two games are compared every 25 frames: if they

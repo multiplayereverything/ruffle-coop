@@ -29,9 +29,12 @@ const SHOW_WAITING: Duration = Duration::from_secs(2);
 /// A player this long silent while the game waits is treated as gone.
 const GIVE_UP: Duration = Duration::from_secs(5);
 
+/// Ruffle Together's own version (the Ruffle it is built on has its own).
+pub const VERSION: &str = "1.0.0";
+
 /// This build, as the relay and the other players see it: a different build is refused.
 pub fn build_id() -> String {
-    format!("rc-{}#{:.10}", env!("CARGO_PKG_VERSION"), env!("VERGEN_GIT_SHA"))
+    format!("rc-{VERSION}#{:.10}", env!("VERGEN_GIT_SHA"))
 }
 
 pub struct SessionOpts {
@@ -658,6 +661,13 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    #[test]
+    fn build_id_names_this_release() {
+        assert!(build_id().starts_with("rc-1.0.0#"), "{}", build_id());
+        // the relay keeps 32 characters of a version
+        assert!(build_id().len() <= 32);
     }
 
     #[test]
