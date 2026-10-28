@@ -60,8 +60,8 @@ pub struct SessionOpts {
     /// Player settings that change how a game behaves, as "name=value; ..." (see
     /// `settings_line`); every player must have the same.
     pub settings: String,
-    /// Show the room code in a window (there is no game window yet while the host waits).
-    pub dialogs: bool,
+    /// The window's waiting screen: the room code and who has joined, filled in as they happen.
+    pub lobby: Option<Arc<Mutex<crate::coop::Lobby>>>,
 }
 
 /// The player settings that change how a game behaves, for the handshake.
@@ -386,21 +386,21 @@ impl Session {
         let hosting = matches!(opts.role, Role::HostDirect { .. } | Role::HostRelay { .. });
         let link = connect(opts.role, &build, &opts.name)?;
         let room = link.room_code();
+        let update_lobby = |f: &dyn Fn(&mut crate::coop::Lobby)| {
+            if let Some(lobby) = &opts.lobby
+                && let Ok(mut lobby) = lobby.lock()
+            {
+                f(&mut lobby);
+            }
+        };
+        update_lobby(&|lobby| {
+            lobby.connected = true;
+            lobby.room = room.clone();
+            lobby.players = vec![opts.name.clone()];
+        });
         if let Some(code) = &room {
             tracing::info!("Ruffle Together: room code {code}");
             println!("Ruffle Together room code: {code}");
-            if opts.dialogs {
-                let text = format!(
-                    "Your room code is {code}\n\nTell your friends; the game starts when {} more joined.",
-                    opts.players.saturating_sub(1)
-                );
-                std::thread::spawn(move || {
-                    let _ = rfd::MessageDialog::new()
-                        .set_title("Ruffle Together")
-                        .set_description(text)
-                        .show();
-                });
-            }
         }
         let settings = opts.settings.replace('|', " ");
         // the host is 0; a friend picks a random id that names it until the start
@@ -428,6 +428,9 @@ impl Session {
             // accepted friends in join order: connection, Hello id, name
             let mut friends: Vec<(u8, u64, String)> = vec![];
             while friends.len() + 1 < opts.players as usize {
+                let mut names = vec![opts.name.clone()];
+                names.extend(friends.iter().map(|(_, _, name)| name.clone()));
+                update_lobby(&|lobby| lobby.players = names.clone());
                 let left = deadline.map_or(Duration::from_secs(3600), |d| {
                     d.saturating_duration_since(Instant::now())
                 });
@@ -928,7 +931,7 @@ mod tests {
             start_skew_ms,
             paced: false,
             settings: "frame_rate=None; player_version=None".into(),
-            dialogs: false,
+            lobby: None,
         }
     }
 

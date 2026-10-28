@@ -43,7 +43,9 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - `--coop-delay N` (host): a fixed input delay in frames. Without it the host pings the friends when they
   connect and picks the smallest delay that runs smoothly (about 1 frame per 67 ms of ping; with 3-4
   players a friend's keys go through the host, so the two worst pings count together).
-- The window title shows the room code, your player number, and "waiting for…", "… left" or "OUT OF SYNC".
+- While everyone joins, the window shows the room code (or the port), who has joined, or why it can't start.
+  During the game the window title shows the room code, your player number, and "waiting for…", "… left" or
+  "OUT OF SYNC".
 - Everyone plays with the host's save (unlocked levels); nobody's own save changes.
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
   frame rate, time per frame, and how long the game waited for the other PC's keys.

@@ -216,7 +216,20 @@ fn main() -> Result<(), Error> {
             ),
             None => None,
         };
-        let started = coop::session::Session::start(coop::session::SessionOpts {
+        // the window shows the room code and who has joined while the handshake runs (headless:
+        // no window, the handshake runs here)
+        let lobby = (!coop.coop_headless).then(|| {
+            std::sync::Arc::new(std::sync::Mutex::new(coop::Lobby {
+                hosting: matches!(role, coop::net::Role::HostDirect { .. } | coop::net::Role::HostRelay { .. }),
+                port: match role {
+                    coop::net::Role::HostDirect { port } => Some(port),
+                    _ => None,
+                },
+                needed: coop.coop_players,
+                ..Default::default()
+            }))
+        });
+        let opts = coop::session::SessionOpts {
             role,
             name: coop.coop_name.clone(),
             delay: coop.coop_delay,
@@ -234,27 +247,28 @@ fn main() -> Result<(), Error> {
                 coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
                 coop.game()?.name()
             ),
-            dialogs: !coop.coop_headless,
-        });
-        let session = match started {
-            Ok(session) => session,
-            Err(error) => {
-                // launched from a shortcut there is no console: say it in a window
-                tracing::error!("Ruffle Together: {error:#}");
-                if !preferences.cli.coop.coop_headless {
-                    let _ = rfd::MessageDialog::new()
-                        .set_level(rfd::MessageLevel::Error)
-                        .set_title("Ruffle Together")
-                        .set_description(format!("Can't start the session: {error:#}"))
-                        .show();
-                }
-                return Err(error);
-            }
+            lobby: lobby.clone(),
         };
-        if coop.coop_headless {
-            return coop::session::run_headless(session, &swf, coop.coop_frames);
+        match lobby {
+            None => {
+                let session = coop::session::Session::start(opts).inspect_err(|error| {
+                    tracing::error!("Ruffle Together: {error:#}");
+                })?;
+                return coop::session::run_headless(session, &swf, coop.coop_frames);
+            }
+            Some(lobby) => {
+                coop::set_lobby(lobby.clone());
+                std::thread::spawn(move || match coop::session::Session::start(opts) {
+                    Ok(session) => coop::set_session(session),
+                    Err(error) => {
+                        tracing::error!("Ruffle Together: {error:#}");
+                        if let Ok(mut lobby) = lobby.lock() {
+                            lobby.error = Some(format!("{error:#}"));
+                        }
+                    }
+                });
+            }
         }
-        coop::set_session(session);
         // no menu in a session: it changes things the game sees (scale, quality, fullscreen)
         // or opens another game
         preferences.cli.no_gui = true;

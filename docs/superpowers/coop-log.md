@@ -166,3 +166,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   tests 98/98, zip SHA-256 bfa87cc6...ce26, latest, re-downloaded hash matches. Live relay GM2 2p with the
   downloaded exe (room SQ9DL): ping 160 ms -> 4 frames, 116/116 ms, 1500 frames in 42.9 s, in sync, no stall
   lines. mods-info 430e0f5: ruffle-coop 1.0.3.1.
+- Waiting screen in the window (user: replace the room-code pop-up with something like Ruffle's own UI). The
+  handshake now runs on a thread after the window opens (headless keeps the blocking path); coop::Lobby (room,
+  port, joined names, needed, error) is filled by Session::start and drawn by gui.rs show_lobby (egui) until the
+  session is set, then app.rs loads the game as before (on_metadata resizes the window). Room-code and
+  can't-start message boxes removed. Checked with PrintWindow captures (no input): host on the live relay showed
+  room H6HY8, "Waiting for players: 1 of 2", Player 1: Liam; a friend joined -> host window switched to the game
+  (room H6HY8 - player 1); wrong code ZZZZ9 -> "Can't start the game / No room with code ZZZZ9 ..." in the
+  window. Tests 98/98, windows_lab both modes PASS.

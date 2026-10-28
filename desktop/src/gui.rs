@@ -100,6 +100,10 @@ impl RuffleGui {
 
         self.dialogs.show(&locale, egui_ctx, player.as_deref_mut());
 
+        if let Some(lobby) = crate::coop::waiting_lobby() {
+            show_lobby(egui_ui, &lobby);
+        }
+
         if let Some(player) = player {
             let was_suspended = player.debug_ui().should_suspend_player();
             player.show_debug_ui(egui_ctx, menu_height_offset);
@@ -179,4 +183,48 @@ impl RuffleGui {
 
         player.set_volume(self.dialogs.volume_controls.get_volume());
     }
+}
+
+/// Ruffle Together: the window's waiting screen until everyone has joined the session.
+fn show_lobby(ui: &mut Ui, lobby: &crate::coop::Lobby) {
+    CentralPanel::default().show(ui, |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(ui.available_height() * 0.2);
+            ui.heading("Ruffle Together");
+            ui.add_space(16.0);
+            if let Some(error) = &lobby.error {
+                ui.label(RichText::new("Can't start the game").size(20.0).strong());
+                ui.label(error);
+                ui.add_space(8.0);
+                ui.label("Close this window and try again.");
+                return;
+            }
+            if !lobby.connected {
+                ui.label(if lobby.hosting { "Opening the room..." } else { "Connecting..." });
+                return;
+            }
+            if let Some(code) = &lobby.room {
+                ui.label(if lobby.hosting { "Your room code" } else { "Room" });
+                ui.label(RichText::new(code).size(48.0).monospace().strong());
+            } else if let Some(port) = lobby.port {
+                ui.label(format!("Hosting on port {port}: friends join with your IP address and this port."));
+            }
+            ui.add_space(16.0);
+            if lobby.hosting {
+                let waiting = format!("Waiting for players: {} of {}", lobby.players.len(), lobby.needed);
+                ui.label(RichText::new(waiting).size(18.0));
+                for (i, name) in lobby.players.iter().enumerate() {
+                    ui.label(format!("Player {}: {name}", i + 1));
+                }
+                ui.add_space(8.0);
+                if lobby.room.is_some() {
+                    ui.label("Send the room code to your friends. The game starts when everyone has joined.");
+                } else {
+                    ui.label("The game starts when everyone has joined.");
+                }
+            } else {
+                ui.label(RichText::new("Waiting for the host to start the game...").size(18.0));
+            }
+        });
+    });
 }

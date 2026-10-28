@@ -50,6 +50,8 @@ struct MainWindow {
     next_frame_time: Option<Instant>,
     /// Ruffle Together: the window title last shown for the session.
     coop_title: String,
+    /// Ruffle Together: the window shows the waiting screen; the game loads once the session starts.
+    coop_waiting: bool,
     event_loop_proxy: EventLoopProxy<RuffleEvent>,
 }
 
@@ -370,6 +372,27 @@ impl MainWindow {
         // moves, so that they can get coalesced properly.
         self.flush_mouse_move();
 
+        // Ruffle Together: the waiting screen until everyone has joined, then the game
+        if self.coop_waiting {
+            if crate::coop::session().is_some()
+                && let Some(movie_url) = self.preferences.cli.movie_url.clone()
+            {
+                self.coop_waiting = false;
+                self.gui.create_movie(
+                    &mut self.player,
+                    LaunchOptions::from(&self.preferences),
+                    ContentDescriptor {
+                        url: movie_url,
+                        root_content_path: None,
+                    },
+                );
+            } else {
+                self.gui.window().request_redraw();
+                self.next_frame_time = Some(Instant::now() + std::time::Duration::from_millis(100));
+                return;
+            }
+        }
+
         if let Some(Event { event, .. }) = gilrs.and_then(|gilrs| gilrs.next_event()) {
             match event {
                 EventType::ButtonPressed(button, _) => {
@@ -617,7 +640,13 @@ impl ApplicationHandler<RuffleEvent> for App {
                 gui.file_picker(),
             );
 
-            if let Some(movie_url) = &movie_url {
+            // Ruffle Together: while the handshake runs, the window shows the waiting screen
+            let coop_waiting = crate::coop::waiting_lobby().is_some();
+            if coop_waiting {
+                let _ = window.request_inner_size(LogicalSize::new(640.0, 420.0));
+                window.set_title("Ruffle Together");
+                window.set_visible(true);
+            } else if let Some(movie_url) = &movie_url {
                 gui.create_movie(
                     &mut player,
                     LaunchOptions::from(&preferences),
@@ -657,6 +686,7 @@ impl ApplicationHandler<RuffleEvent> for App {
                 time: Instant::now(),
                 next_frame_time: None,
                 coop_title: String::new(),
+                coop_waiting,
                 event_loop_proxy,
             });
         }

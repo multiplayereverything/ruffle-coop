@@ -13,9 +13,9 @@ pub mod storage;
 pub mod replay;
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-/// The session this process plays in, if any (set once, before the window opens).
+/// The session this process plays in, if any (set once, when the handshake is done).
 static SESSION: OnceLock<Mutex<session::Session>> = OnceLock::new();
 
 pub fn set_session(session: session::Session) {
@@ -25,6 +25,38 @@ pub fn set_session(session: session::Session) {
 /// The running session; None in normal (single-player) use, where nothing changes.
 pub fn session() -> Option<MutexGuard<'static, session::Session>> {
     SESSION.get().and_then(|session| session.lock().ok())
+}
+
+/// What the window shows while the handshake runs on its own thread: the room code, who has
+/// joined, or why it failed.
+#[derive(Clone, Debug, Default)]
+pub struct Lobby {
+    pub hosting: bool,
+    /// Connected to the host or relay (a friend), or the room is open (the host).
+    pub connected: bool,
+    /// The relay room code.
+    pub room: Option<String>,
+    /// Hosting directly: the port friends connect to.
+    pub port: Option<u16>,
+    /// Hosting: the players in so far (the host first), and how many the game starts with.
+    pub players: Vec<String>,
+    pub needed: u8,
+    /// The handshake failed: why.
+    pub error: Option<String>,
+}
+
+static LOBBY: OnceLock<Arc<Mutex<Lobby>>> = OnceLock::new();
+
+pub fn set_lobby(lobby: Arc<Mutex<Lobby>>) {
+    let _ = LOBBY.set(lobby);
+}
+
+/// The lobby while the window waits for the session (None once the game runs, and in normal use).
+pub fn waiting_lobby() -> Option<Lobby> {
+    if SESSION.get().is_some() {
+        return None;
+    }
+    LOBBY.get().and_then(|lobby| lobby.lock().ok()).map(|lobby| lobby.clone())
 }
 
 #[derive(clap::Args, Debug, Clone, Default)]
