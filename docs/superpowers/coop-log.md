@@ -174,3 +174,7 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   room H6HY8, "Waiting for players: 1 of 2", Player 1: Liam; a friend joined -> host window switched to the game
   (room H6HY8 - player 1); wrong code ZZZZ9 -> "Can't start the game / No room with code ZZZZ9 ..." in the
   window. Tests 98/98, windows_lab both modes PASS.
+- Release v1.0.3.2 (user: "push, publish release 1.0.3.2 and bump mods-info"): commit f1fc8d9, tests 98/98, zip
+  SHA-256 8ebf601e...491f, latest, re-downloaded hash matches. Live with the downloaded exe: windowed host showed
+  room USST9 + "Waiting for players: 1 of 2"; a friend joined by code, both started (4 frames, 162 ms ping), host
+  window switched to the game.
