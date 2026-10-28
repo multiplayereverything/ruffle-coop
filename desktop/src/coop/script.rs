@@ -1,0 +1,128 @@
+//! Scripted input for tests and labs, so nothing ever touches the real keyboard or mouse.
+//!
+//! ```text
+//! # comment
+//! p0 UP|FIRE      player 0 holds these from now on (UP DOWN LEFT RIGHT FIRE ALT, or 0)
+//! wait 25         25 frames with what is held now
+//! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
+//! move 100 50     host mouse moves (no click)
+//! ```
+
+use crate::coop::lockstep::{ALT, DOWN, FIRE, InputFrame, LEFT, MAX_PLAYERS, RIGHT, UP};
+
+pub struct Script {
+    frames: Vec<[InputFrame; MAX_PLAYERS]>,
+}
+
+impl Script {
+    pub fn parse(text: &str) -> Result<Script, String> {
+        let mut frames = vec![];
+        let mut now = [InputFrame::default(); MAX_PLAYERS];
+        for (number, line) in text.lines().enumerate() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            if line.is_empty() {
+                continue;
+            }
+            let fail = |why: &str| format!("line {}: {why}: {line}", number + 1);
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let int = |i: usize| -> Result<i32, String> {
+                words.get(i).and_then(|w| w.parse().ok()).ok_or_else(|| fail("expected a number"))
+            };
+            match words[0] {
+                "wait" => {
+                    let n = int(1)?;
+                    frames.extend(std::iter::repeat_n(now, n.max(0) as usize));
+                }
+                "click" | "move" => {
+                    let (x, y) = (int(1)? * 20, int(2)?.saturating_mul(20));
+                    if words[0] == "click" {
+                        now[0].mouse = Some((x, y, true));
+                        frames.push(now);
+                    }
+                    now[0].mouse = Some((x, y, false));
+                }
+                word if word.starts_with('p') => {
+                    let player: usize = word[1..]
+                        .parse()
+                        .ok()
+                        .filter(|&p| p < MAX_PLAYERS)
+                        .ok_or_else(|| fail("unknown player"))?;
+                    let mut buttons = 0;
+                    for name in words.get(1).ok_or_else(|| fail("expected buttons"))?.split('|') {
+                        buttons |= match name {
+                            "0" => 0,
+                            "UP" => UP,
+                            "DOWN" => DOWN,
+                            "LEFT" => LEFT,
+                            "RIGHT" => RIGHT,
+                            "FIRE" => FIRE,
+                            "ALT" => ALT,
+                            _ => return Err(fail("unknown button")),
+                        };
+                    }
+                    now[player].buttons = buttons;
+                }
+                _ => return Err(fail("unknown command")),
+            }
+        }
+        Ok(Script { frames })
+    }
+
+    /// Number of scripted frames.
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// `player`'s input at `frame`; empty after the script ends.
+    pub fn input(&self, frame: usize, player: usize) -> InputFrame {
+        self.frames
+            .get(frame)
+            .map(|row| row[player])
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_repeats_current_buttons() {
+        let script = Script::parse("p0 UP|FIRE\np1 LEFT\nwait 3\np0 0\nwait 1").expect("parses");
+        assert_eq!(script.len(), 4);
+        assert_eq!(script.input(0, 0).buttons, UP | FIRE);
+        assert_eq!(script.input(2, 1).buttons, LEFT);
+        assert_eq!(script.input(3, 0).buttons, 0);
+        assert_eq!(script.input(3, 1).buttons, LEFT);
+    }
+
+    #[test]
+    fn click_is_one_frame_down_then_up() {
+        let script = Script::parse("click 275 300\nwait 2").expect("parses");
+        assert_eq!(script.len(), 3);
+        assert_eq!(script.input(0, 0).mouse, Some((275 * 20, 300 * 20, true)));
+        assert_eq!(script.input(1, 0).mouse, Some((275 * 20, 300 * 20, false)));
+        // only the host has a mouse
+        assert_eq!(script.input(0, 1).mouse, None);
+    }
+
+    #[test]
+    fn past_the_end_is_empty_input() {
+        let script = Script::parse("p0 UP\nwait 1").expect("parses");
+        assert_eq!(script.input(99, 0), InputFrame::default());
+    }
+
+    #[test]
+    fn comments_and_blank_lines_are_skipped() {
+        let script = Script::parse("# start\n\nwait 2 # two frames").expect("parses");
+        assert_eq!(script.len(), 2);
+    }
+
+    #[test]
+    fn mistakes_name_the_line() {
+        let err = Script::parse("wait 1\np0 JUMP").err().expect("an error");
+        assert!(err.contains("line 2"), "{err}");
+        assert!(Script::parse("p9 UP").is_err());
+        assert!(Script::parse("click 1").is_err());
+    }
+}

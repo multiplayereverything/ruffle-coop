@@ -39,6 +39,37 @@ pub fn fingerprint(context: &mut UpdateContext<'_>) -> u64 {
     hash.finish()
 }
 
+/// What the fingerprint covers, one line per object, to find what differs after a desync.
+pub fn describe(context: &mut UpdateContext<'_>) -> String {
+    let mut out = format!(
+        "clock {} ms, rng {:08x}\n",
+        context.elapsed_since_start().as_millis(),
+        context.rng.state()
+    );
+    describe_object(context.stage.into(), 0, &mut out);
+    out
+}
+
+fn describe_object(object: DisplayObject<'_>, indent: usize, out: &mut String) {
+    let frame = object.as_movie_clip().map(|clip| clip.current_frame());
+    out.push_str(&format!(
+        "{:indent$}depth {} id {} name {} at ({}, {}) frame {:?} visible {}\n",
+        "",
+        object.depth(),
+        object.id(),
+        object.name().map(|n| n.to_string()).unwrap_or_default(),
+        object.x().get(),
+        object.y().get(),
+        frame,
+        object.visible(),
+    ));
+    if let Some(container) = object.as_container() {
+        for child in container.iter_render_list() {
+            describe_object(child, indent + 2, out);
+        }
+    }
+}
+
 /// Every object on stage, depth first: where it is, what it is, which frame it shows.
 fn add_object(object: DisplayObject<'_>, hash: &mut Fnv) {
     hash.add(object.depth() as i64 as u64);

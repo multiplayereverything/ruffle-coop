@@ -154,6 +154,10 @@ fn main() -> Result<(), Error> {
 
     let opt = Opt::parse();
 
+    if opt.coop.coop_replay.is_some() {
+        return coop::replay::run_cli(&opt.coop);
+    }
+
     #[cfg(feature = "shell-completions")]
     if let Some(shell) = opt.completions {
         let mut cmd = Opt::command();

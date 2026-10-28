@@ -47,6 +47,10 @@ pub struct Opt {
     #[arg(long = "completions", value_enum)]
     pub completions: Option<Shell>,
 
+    /// Ruffle Together (online co-op) options.
+    #[clap(flatten)]
+    pub coop: crate::coop::CoopOpt,
+
     /// Path or URL of a Flash movie (SWF) to play.
     #[clap(name = "FILE", value_parser(parse_movie_file_or_url))]
     pub movie_url: Option<Url>,

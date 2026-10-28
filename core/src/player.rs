@@ -961,6 +961,11 @@ impl Player {
         self.mutate_with_update_context(crate::coop_fingerprint::fingerprint)
     }
 
+    /// Ruffle Together: what the fingerprint covers, readable, for desync reports.
+    pub fn coop_describe(&mut self) -> String {
+        self.mutate_with_update_context(crate::coop_fingerprint::describe)
+    }
+
     /// Moves the frame clock by one frame; does nothing outside a session.
     pub fn advance_frame_clock(&mut self, frame: Duration) {
         if let Some(clock) = &self.frame_clock

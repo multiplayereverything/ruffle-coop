@@ -1,0 +1,140 @@
+wait 420
+move 275 482
+wait 5
+click 275 482
+wait 60
+move 278 300
+wait 5
+click 278 300
+wait 60
+move 395 230
+wait 5
+click 395 230
+wait 60
+move 155 190
+wait 5
+click 155 190
+wait 30
+move 455 170
+wait 5
+click 455 170
+wait 60
+move 123 97
+wait 10
+click 123 97
+wait 10
+click 123 97
+wait 250
+# help popup: continue
+move 435 418
+wait 5
+click 435 418
+wait 30
+# round 1
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
+# round 2
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
+# round 3
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
+# round 4
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
+# round 5
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
+# round 6
+p0 LEFT
+p1 RIGHT
+wait 30
+p0 UP|FIRE
+p1 DOWN
+wait 20
+p0 RIGHT
+p1 LEFT|FIRE
+wait 30
+p0 DOWN
+p1 UP
+wait 20
+p0 0
+p1 FIRE
+wait 10
+p1 0
+wait 10
