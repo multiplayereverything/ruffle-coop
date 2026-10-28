@@ -359,7 +359,7 @@ impl<F: FutureSpawner<Error> + 'static, I: NavigatorInterface> NavigatorBackend
                 Result::<TcpStream, io::Error>::Err(io::Error::new(ErrorKind::TimedOut, ""))
             };
 
-            let mut stream = match TcpStream::connect((host, port)).or(timeout).await {
+            let mut stream = match connect_tcp(&host, port).or(timeout).await {
                 Err(e) if e.kind() == ErrorKind::TimedOut => {
                     warn!("Connection to {}:{} timed out", host2, port);
                     let action = SocketAction::Connect(handle, ConnectionState::TimedOut);
@@ -482,6 +482,16 @@ where
     tokio::task::unconstrained(receiver)
         .await
         .expect("Oneshot should succeed")
+}
+
+/// Connects a SWF's socket. Nagle is turned off: games send small messages every frame, and with
+/// Nagle each one waited for the server's (delayed) ACK of the previous one, adding ~50 ms per message.
+async fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
+    let stream = TcpStream::connect((host, port)).await?;
+    if let Err(e) = stream.set_nodelay(true) {
+        warn!("Failed to disable Nagle on {}:{}: {}", host, port, e);
+    }
+    Ok(stream)
 }
 
 #[cfg(test)]
@@ -650,6 +660,13 @@ mod tests {
             client_read;
             Connect(dummy_handle!(), ConnectionState::TimedOut),
         );
+    }
+
+    #[macro_rules_attribute::apply(async_test)]
+    async fn test_socket_nodelay() {
+        let (_accept_task, addr) = start_test_server().await;
+        let stream = connect_tcp("127.0.0.1", addr.port()).await.unwrap();
+        assert!(stream.nodelay().unwrap());
     }
 
     #[macro_rules_attribute::apply(async_test)]
