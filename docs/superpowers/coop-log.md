@@ -141,3 +141,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   Stable GM2 test copy (no build touches it): ai-work-flash-games/gm2-mod/ruffle-together/gunmayhem2_online.swf
   (sha 080b5f9b...) + ruffle-together-4p.txt. dist/gunmayhem2_online.swf can be the old relay build (build.py
   without --coop).
+- Release v1.0.3 (user: "push, publish release 1.0.3, bump mods-info, and ask the launcher session ..."): commit
+  d21ad3d, tests 97/97, tag v1.0.3, RuffleTogether-1.0.3-windows-x64.zip SHA-256 a510def9...0a7c, latest,
+  re-downloaded hash matches. Live relay with the downloaded exe: Bad Ice-Cream 2p (room ZAEG4) 100/100 ms in sync;
+  GM2 4p with the flash-games file (sha 080b5f9b..., room UTDJE) 1500 frames in sync, 43.3-43.5 s (42.9 at 35 fps),
+  path ping 328 ms -> 7 frames (all 4 on this PC). mods-info decbe2b: ruffle-coop 1.0.3, game names both games.
+  Asked the launcher session to switch GM2 to Ruffle Together (online id ruffle-coop, --coop-keys gun-mayhem-2,
+  host --coop-players picker, no FlashVars/--tcp-connections, drop the dist fallback, guide without F9).
