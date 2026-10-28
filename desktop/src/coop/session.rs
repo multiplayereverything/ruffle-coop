@@ -24,8 +24,10 @@ const CHECK_EVERY: u32 = 25;
 const MAX_CATCH_UP: u32 = 10;
 /// "Waiting for <name>" shows after this long without a frame.
 const SHOW_WAITING: Duration = Duration::from_secs(2);
-/// A player this long silent while the game waits is treated as gone.
-const GIVE_UP: Duration = Duration::from_secs(5);
+/// A player this long silent while the game waits is treated as gone. A player who leaves is
+/// noticed at once (the connection closes); this is for a connection that stays open but stalls,
+/// which an internet or relay hiccup does for several seconds (5 s ended a game over the relay).
+const GIVE_UP: Duration = Duration::from_secs(60);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
 pub const VERSION: &str = "1.0.3";
@@ -699,6 +701,10 @@ impl Session {
                 self.timing.felt(taken.elapsed());
             }
             self.lockstep.advance();
+            let stalled = self.last_frame_at.elapsed();
+            if stalled > SHOW_WAITING {
+                tracing::warn!("Ruffle Together: the game waited {:.1} s for the other players", stalled.as_secs_f64());
+            }
             self.last_frame_at = Instant::now();
             if frame % CHECK_EVERY == CHECK_EVERY - 1 {
                 let hash = player.coop_fingerprint();
@@ -1144,6 +1150,37 @@ mod tests {
         let (host_state, _) = host.join().expect("host");
         assert!(host_state.closed.is_some(), "host still waiting");
         assert!(left_at.elapsed() < Duration::from_secs(6));
+    }
+
+    /// A connection that stalls for a while (an internet or relay hiccup) but stays open must not
+    /// end the game: both PCs wait, then carry on (a GM2 game over the relay ended on a 5 s stall).
+    #[test]
+    fn a_long_stall_is_waited_out() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(opts(Role::HostDirect { port }, &host_swf, 0), 400, None));
+        thread::sleep(Duration::from_millis(300));
+        let addr = format!("127.0.0.1:{port}");
+        let mut friend = Session::start(opts(Role::JoinDirect { addr }, &swf, 0)).expect("session");
+        let player = headless_player(&swf, Some(friend.clock()), friend.take_storage()).expect("player");
+        let mut player = player.lock().expect("player");
+        let mut state = SessionState::default();
+        let mut stalled = false;
+        while friend.frame() < 400 && state.closed.is_none() {
+            if friend.frame() >= 100 && !stalled {
+                // nothing sent or read for 8 s, the connection stays open
+                thread::sleep(Duration::from_secs(8));
+                stalled = true;
+            }
+            state = friend.tick(&mut player);
+            thread::sleep(Duration::from_millis(1));
+        }
+        let (host_state, _) = host.join().expect("host");
+        assert_eq!(host_state.closed, None, "the host gave up");
+        assert_eq!(state.closed, None, "the friend gave up");
+        assert_eq!(host_state.desync_at, None);
+        assert!(friend.frame() >= 400, "the friend carried on");
     }
 
     /// A friend's keys reach another friend through the host: that trip is the two friends' pings

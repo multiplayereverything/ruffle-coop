@@ -152,3 +152,12 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   --coop-players 2, "Host a room for 3/4 players" and direct host 2/3/4 under Other ways; joins with --coop-keys
   gun-mayhem-2; no FlashVars/--tcp-connections; swf only GAMES_DIR. Its test: --launch gunmayhem2:host4 gave the
   expected command line. Not played in a match there; not tried on two PCs.
+- User's first GM2 game through the relay (2 players, room P9GFE): mid-match both windows "<other> stopped
+  answering" at once. Friend's log (RTX 3050, player 2): delay 4 frames (high ping), frequent waits up to 448 ms
+  before; cut off before the end. Relay checked: star forwarding is lossless and ordered (throttles at 600 msg/s,
+  never drops); TCP doesn't lose lines; so not a lost message. Both giving up together = the link stalled both ways
+  > GIVE_UP (5 s) while connected. Test a_long_stall_is_waited_out (friend silent 8 s, connection open) RED
+  ("tester stopped answering") -> GIVE_UP 60 s (a leaving player is still noticed at once by the closed
+  connection; friend_leaving test < 6 s still passes) + a WARN "the game waited N s" after any stall > 2 s -> GREEN.
+  Tests 98/98. Not confirmed: the host's log (other PC) for what stalled. GM2 also floods the log with AVM1 "Cannot
+  delete property onEnterFrame" warnings (1.5 MB per game).
