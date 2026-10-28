@@ -123,3 +123,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (covered: quality is a compared setting, no context menu in a session, save Q shared); Esc/Space/Home pause/quit
   (never sent: only mapped keys); it will force controlarray defaults for all 4 slots in its build. Replay now feeds
   as many players as the game has keys for. windows_lab PASS both modes, tests 97/97.
+- GM2 co-op SWF from the GM2 session (build.py --coop, sha256 080b5f9b...d901, original + controlarray defaults for
+  4 slots at arena start, no netcode). Verified here: --coop-replay 3300 frames with its 4-human script
+  (gm2-mod/lab/ruffle-together-4p.txt) twice -> identical (8e30f66c...); screenshots 1800/3290 show a 4-human
+  Avalon match with kills, grenades, last lives. lab.py/windows_lab.py gained --script (lab.py had always used
+  Bad Ice-Cream's script, so its GM2 runs never left the menu). Real-match lab, 3300 frames (GM2 is 35 fps):
+  2p relay 20 ms lag 61/62 ms, 2p direct 33/33, 4p relay 92-93 ms, all in sync, 94.3-94.5 s. The 4p direct run
+  failed to start: gunmayhem2_coop.swf was deleted from gm2-mod/dist at 20:06:57 by an online rebuild; asked the
+  GM2 session to restore it outside dist/.

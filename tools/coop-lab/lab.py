@@ -6,6 +6,7 @@ whether the games stayed in sync and how long inputs took to reach the game.
 
   python tools/coop-lab/lab.py --swf <BadIceCream_coop.swf> [--mode relay|direct|both]
       [--frames 4500] [--lag 40] [--jitter 10] [--delay N] [--players 2] [--keys bad-ice-cream]
+      [--script <input script>]
 
 Nothing touches the keyboard or mouse; test ports avoid the ones real games use.
 """
@@ -38,7 +39,7 @@ def free_port():
 
 def player(args, role_args, name, out):
     delay = ["--coop-delay", str(args.delay)] if args.delay is not None else []
-    cmd = [RUFFLE, "--coop-headless", "--coop-frames", str(args.frames), "--coop-script", SCRIPT,
+    cmd = [RUFFLE, "--coop-headless", "--coop-frames", str(args.frames), "--coop-script", args.script,
            "--coop-name", name, "--coop-keys", args.keys, "--coop-players", str(args.players)] + delay + role_args + [args.swf]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     out[name] = {"proc": proc, "lines": []}
@@ -124,6 +125,7 @@ def main():
     ap.add_argument("--delay", type=int, help="input delay, frames (default: the host picks it from the ping)")
     ap.add_argument("--players", type=int, default=2, help="2-4 (3-4 need keys for that many, e.g. gun-mayhem-2)")
     ap.add_argument("--keys", default="bad-ice-cream", help="--coop-keys for every player")
+    ap.add_argument("--script", default=SCRIPT, help="input script (default: Bad Ice-Cream's)")
     args = ap.parse_args()
     for mode in (["relay", "direct"] if args.mode == "both" else [args.mode]):
         extra = " (lag %g ms one way + 0-%g ms jitter)" % (args.lag, args.jitter) if mode == "relay" else ""

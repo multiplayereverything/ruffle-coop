@@ -9,7 +9,7 @@ checks each window's "Ruffle Together timing" log lines against pass limits. Run
             touched
 
   python tools/coop-lab/windows_lab.py --swf <BadIceCream_coop.swf> [--exe <ruffle_desktop.exe>]
-      [--mode quiet|pressure|both] [--seconds 40] [--delay N]
+      [--mode quiet|pressure|both] [--seconds 40] [--delay N] [--keys bad-ice-cream] [--script <file>]
 
 Exit code 0 only if every window in every mode passes.
 """
@@ -117,7 +117,7 @@ def judge(name, lines, prints):
 def run(args, mode):
     work = tempfile.mkdtemp(prefix="coop-windows-lab-")
     port = free_port()
-    common = ["--coop-script", SCRIPT]
+    common = ["--coop-script", args.script, "--coop-keys", args.keys]
     delay = ["--coop-delay", str(args.delay)] if args.delay is not None else []
     host = subprocess.Popen([args.exe, "--cache-directory", os.path.join(work, "host"), "--coop-host", str(port),
                              "--coop-name", "Host"] + delay + common + [args.swf],
@@ -162,6 +162,8 @@ def main():
     parser.add_argument("--exe", default=RUFFLE)
     parser.add_argument("--mode", choices=["quiet", "pressure", "both"], default="both")
     parser.add_argument("--seconds", type=int, default=40)
+    parser.add_argument("--keys", default="bad-ice-cream", help="--coop-keys for both windows")
+    parser.add_argument("--script", default=SCRIPT, help="input script (default: Bad Ice-Cream's)")
     parser.add_argument("--delay", type=int, help="input delay, frames (default: the host picks it from the ping)")
     args = parser.parse_args()
     modes = ["quiet", "pressure"] if args.mode == "both" else [args.mode]
