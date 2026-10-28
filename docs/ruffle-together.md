@@ -1,6 +1,6 @@
 # Ruffle Together
 
-Version 1.0.1 (build id `rc-1.0.1#<commit>`; players must use the same build).
+Version 1.0.2 (build id `rc-1.0.2#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with a friend. Both PCs run the same game in this Ruffle build;
 only the key presses travel, and every frame runs on both PCs with both players' keys. Both players get
