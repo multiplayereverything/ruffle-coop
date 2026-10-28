@@ -184,3 +184,7 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   windowed start (sessions and plain Ruffle); headless skipped; labs use their own --cache-directory. Checked: A
   hosting port 7846 then B in the same cache folder -> A closed (log line), B hosted 7846 with no error; C in another
   folder stayed open. Tests 98/98, windows_lab quiet PASS. Not released.
+- Release v1.0.3.3 (user: "push, publish release 1.0.3.3 and bump mods-info"): commit 4a2da85, tests 98/98,
+  zip SHA-256 421f17fa...accf, latest, re-downloaded hash matches. Live with the downloaded exe: a solo window was
+  closed by a host window started in the same cache folder (log line); the host and a friend from another folder
+  met in room SVMT2 and started (4 frames, 162 ms ping).
