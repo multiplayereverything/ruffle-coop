@@ -178,12 +178,7 @@ impl Game {
     }
 
     pub fn local_buttons(&self, held: &HashSet<PhysicalKey>) -> u16 {
-        // Esc pauses, unless the map gives it to the game
-        let mut buttons = if held.contains(&PhysicalKey::Escape) && !self.local.iter().any(|(code, _)| *code == 27) {
-            crate::coop::lockstep::PAUSE
-        } else {
-            0
-        };
+        let mut buttons = 0;
         for &key in held {
             let pressed = KeyDescriptor { physical_key: key, logical_key: LogicalKey::Unknown, key_location: KeyLocation::Standard };
             if let (Some(code), _) = ruffle_core::coop_key_codes(pressed) {
@@ -587,12 +582,10 @@ mod tests {
         assert!(game("bad-ice-cream").has_local_char(' '));
     }
 
-    /// Esc pauses (every map), unless the map gives Esc to the game.
+    /// Esc is an ordinary key: nothing unless the map gives it a button.
     #[test]
-    fn esc_pauses_unless_the_game_has_it() {
-        use crate::coop::lockstep::PAUSE;
-        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape])), PAUSE);
-        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape, PhysicalKey::KeyZ])), PAUSE | FIRE);
+    fn esc_is_only_what_the_map_says() {
+        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape])), 0);
         let esc_is_fire = Game::parse("t", "slot 0: FIRE=27
 local: FIRE=27").expect("map");
         assert_eq!(esc_is_fire.local_buttons(&held(&[PhysicalKey::Escape])), FIRE);
@@ -627,7 +620,7 @@ local: FIRE=27").expect("map");
         want.sort_by_key(|k| *k as u32);
         assert_eq!(watergirl, want, "Watergirl is W A D");
         assert_eq!(down_keys(&keys.events(0, MENU)), vec![PhysicalKey::KeyP], "P pauses");
-        // on their own PC each player may use either key set, and Esc pauses too
+        // on their own PC each player may use either key set, and Esc is the game's pause
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::KeyW])), UP);
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::ArrowLeft])), LEFT);
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::Escape])), MENU);

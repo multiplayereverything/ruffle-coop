@@ -105,14 +105,11 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let (labels, paused, notice, chat) = crate::coop::session()
-                .map(|session| (session.labels(), session.paused_text(), session.notice(), session.chat_view()))
+            let (labels, notice, chat) = crate::coop::session()
+                .map(|session| (session.labels(), session.notice(), session.chat_view()))
                 .unwrap_or_default();
             show_chat(egui_ctx, &chat.0, chat.1.as_deref());
             show_labels(egui_ctx, player, &labels, menu_height_offset);
-            if let Some(paused) = paused {
-                show_paused(egui_ctx, &paused);
-            }
             if let Some(notice) = notice {
                 Area::new(Id::new("coop-notice"))
                     .anchor(Align2::CENTER_TOP, vec2(0.0, 40.0))
@@ -248,21 +245,6 @@ fn show_chat(egui_ctx: &egui::Context, lines: &[String], chat_box: Option<&str>)
                     ui.label(RichText::new(format!("> {text}_")).strong());
                     ui.label(RichText::new("Enter to send, Esc to close").small());
                 }
-            });
-        });
-}
-
-/// Ruffle Together: who paused the game, over it, until someone presses Esc.
-fn show_paused(egui_ctx: &egui::Context, paused: &str) {
-    Area::new(Id::new("coop-paused"))
-        .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
-        .order(Order::Foreground)
-        .show(egui_ctx, |ui| {
-            Frame::popup(ui.style()).show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(paused).size(22.0).strong());
-                    ui.label("Press Esc to resume");
-                });
             });
         });
 }

@@ -14,7 +14,7 @@ package {
      *
      *   UP DOWN LEFT RIGHT  move your dot        FIRE  ring around your dot
      *   KEY1  switch the game's key map (menu: FIRE = Enter, play: FIRE = Space)
-     *   KEY2  coop.pause (any player's Esc resumes)          KEY3  your camera off / on
+     *   KEY3  your camera off / on
      *   typing goes to your line of the name board; Enter makes it your dot's label
      *
      * Gameplay reads only shared answers. localSlot, isHost and ping only reach the HUD's text.
@@ -24,9 +24,9 @@ package {
         private static const H:int = 1800;
         private static const COLORS:Array = [0xE04040, 0x3070F0, 0x30B050, 0xE0A020];
         private static const BUTTONS:Array = ["UP", "DOWN", "LEFT", "RIGHT", "FIRE", "ALT", "KEY1", "KEY2", "KEY3", "KEY4",
-            "VIEW", "QUIT", "YES", "NO", "MENU", "PAUSE"];
+            "VIEW", "QUIT", "YES", "NO", "MENU"];
         private static const FEATURES:Array = ["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons",
-            "typed", "options", "ping", "pause", "events", "chat", "teleport"];
+            "typed", "options", "ping", "events", "chat", "teleport"];
         private static const MENU_KEYS:String = "slot 0: FIRE=13\nslot 1: FIRE=13\nslot 2: FIRE=13\nslot 3: FIRE=13\n";
         private static const PLAY_KEYS:String = "slot 0: FIRE=32\nslot 1: FIRE=32\nslot 2: FIRE=32\nslot 3: FIRE=32\n";
 
@@ -50,7 +50,6 @@ package {
         private var menuKeys:Boolean = false;
         private var keyEvents:Array = [];
         private var events:Array = [];
-        private var gamePausedAt:int = -1;
 
         public function CoopDemo() {
             n = RuffleTogether.players();
@@ -191,10 +190,6 @@ package {
                     menuKeys = !menuKeys;
                     RuffleTogether.keys(menuKeys ? MENU_KEYS : PLAY_KEYS);
                 }
-                if (pressed(s, bits, 128)) {
-                    gamePausedAt = frame;
-                    RuffleTogether.pause();
-                }
                 if (pressed(s, bits, 256)) {
                     cameraOn[s] = !cameraOn[s];
                 }
@@ -260,8 +255,7 @@ package {
                 + "has: " + has.join(" ") + "\n"
                 + "options: " + (opts.length ? opts.join("  ") : "(none)") + "   (speed " + speed + ", zoom " + zoom + ")\n"
                 + who.join("\n") + "\n"
-                + "key map: " + (menuKeys ? "MENU (FIRE=Enter)" : "PLAY (FIRE=Space)") + "   game got keys: " + keyEvents.join(", ")
-                + "\ncoop.pause called at frame " + (gamePausedAt < 0 ? "-" : String(gamePausedAt));
+                + "key map: " + (menuKeys ? "MENU (FIRE=Enter)" : "PLAY (FIRE=Space)") + "   game got keys: " + keyEvents.join(", ");
             var text2:String = "NAME BOARD (coop.typed; Enter = label)\n";
             for (var t:int = 0; t < n; t++) {
                 text2 += "P" + (t + 1) + ": " + lines[t] + "_" + (given[t] ? "   label: " + given[t] : "") + "\n";

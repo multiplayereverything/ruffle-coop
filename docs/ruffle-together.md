@@ -58,7 +58,6 @@ The relay needs the `ruffle-coop` game in mods-info first.
   `solo` or `new` the host's co-op save is replaced the first time the game saves (each friend's too).
 - **Typing:** names and chat typed in the game's own text boxes reach the game for everyone (any key, capitals,
   Backspace, Enter, paste). While no text box is selected, only your mapped keys type.
-- **Pause:** Esc pauses or resumes the game for everyone ("Paused by Sam").
 - **Chat:** `/` opens a chat box; Enter sends, Esc closes. Your keys don't reach the game while it's open.
 - **Leaving:** a friend who leaves or drops out doesn't stop the game: everyone else plays on ("Sam left").
   If the host leaves, the game ends.
@@ -169,7 +168,7 @@ fall back to single-player answers (1 player, slot 0, no camera), so one SWF wor
 ## Known limits (v1)
 
 - Only the keys in the game's key map reach the game as keys (P, M and the like don't, unless a map names
-  them); Esc pauses and `/` opens the chat unless the map gives them to the game.
+  them); `/` opens the chat unless the map gives it to the game.
 - If the host leaves, the session ends for everyone (a friend leaving doesn't end it).
 - During a session there is no menu, no fullscreen, and no opening another file; the stage keeps the game's
   own size (the window can still be resized).

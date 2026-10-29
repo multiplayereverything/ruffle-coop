@@ -1196,14 +1196,6 @@ impl Session {
         pings
     }
 
-    /// "Paused by Sam" while the game is paused (for the window).
-    pub fn paused_text(&self) -> Option<String> {
-        self.stepper.paused().map(|by| match by {
-            crate::coop::frame::PausedBy::Player(slot) => format!("Paused by {}", self.name(slot)),
-            crate::coop::frame::PausedBy::Game => "Paused".to_string(),
-        })
-    }
-
     /// The name tags the game asked for (`coop.label`), for the window to draw.
     pub fn labels(&self) -> Vec<crate::coop::api::Label> {
         self.stepper.labels()

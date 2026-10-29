@@ -1,7 +1,7 @@
 # The API demo's starting key map (the SWF switches it with coop.keys: menu FIRE=Enter, play FIRE=Space).
-# Arrows move, Space fires, 1 key maps, 2 pause, 3 camera; Esc (not mapped) pauses for everyone.
+# Arrows move, Space fires, 1 key maps, 3 camera.
 slot 0: FIRE=32
 slot 1: FIRE=32
 slot 2: FIRE=32
 slot 3: FIRE=32
-local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=32 KEY1=49 KEY2=50 KEY3=51
+local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=32 KEY1=49 KEY3=51

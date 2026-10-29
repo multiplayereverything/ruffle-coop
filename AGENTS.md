@@ -24,7 +24,7 @@ player's PC runs the same Flash game and only inputs travel. Work happens on bra
 | Network session (handshake, inputs, leave, chat, pings) | `desktop/src/coop/session.rs`, `protocol.rs`, `net.rs`, `lockstep.rs` |
 | Key maps | `desktop/src/coop/keymap.rs`, `desktop/src/coop/keys/*.keys` |
 | Camera, HUD, frame clock, fingerprint (core) | `core/src/coop_view.rs`, `core/src/frame_clock.rs`, `core/src/coop_fingerprint.rs` |
-| Window overlays (labels, pause, chat, lobby) | `desktop/src/gui.rs` |
+| Window overlays (labels, notices, chat, lobby) | `desktop/src/gui.rs` |
 | Discord presence | `desktop/src/coop/discord.rs` |
 | Game-side helper library | `tools/coop-api/as2/RuffleTogether.as`, `tools/coop-api/as3/RuffleTogether.as` |
 | Labs | `tools/coop-lab/lab.py` (headless players), `tools/coop-lab/windows_lab.py` (two real windows) |

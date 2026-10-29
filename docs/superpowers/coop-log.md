@@ -288,3 +288,5 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   ping. Found: with a co-op camera, shapes, text and bitmaps outside the original stage were culled (only
   containers showed), so a big world drew no rings, cursors or text there. Fix: `Stage::view_bounds` is the stage
   plus what the camera shows.
+- Pausing removed (user: "i dont see a reason with coop.pause, get rid of it completely"): no PAUSE button, Esc is an
+  ordinary key again, no `coop.pause`, no pause/resume events, no "Paused by" overlay. 147/147, replays unchanged.

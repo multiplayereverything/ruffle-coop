@@ -1,4 +1,4 @@
-# Windows: the demo script three times, after 5 s to look first (about 3 minutes).
+# Windows: the demo script three times, after 5 s to look first (about 2.5 minutes).
 wait 150
 wait 60
 type 0 Annx
@@ -50,22 +50,6 @@ p1 KEY3
 wait 2
 p1 0
 wait 30
-p0 KEY2
-wait 2
-p0 0
-wait 90
-p1 PAUSE
-wait 2
-p1 0
-wait 30
-p0 PAUSE
-wait 2
-p0 0
-wait 90
-p0 PAUSE
-wait 2
-p0 0
-wait 30
 p0 UP|LEFT
 p1 UP
 wait 60
@@ -125,22 +109,6 @@ p1 KEY3
 wait 2
 p1 0
 wait 30
-p0 KEY2
-wait 2
-p0 0
-wait 90
-p1 PAUSE
-wait 2
-p1 0
-wait 30
-p0 PAUSE
-wait 2
-p0 0
-wait 90
-p0 PAUSE
-wait 2
-p0 0
-wait 30
 p0 UP|LEFT
 p1 UP
 wait 60
@@ -199,22 +167,6 @@ wait 90
 p1 KEY3
 wait 2
 p1 0
-wait 30
-p0 KEY2
-wait 2
-p0 0
-wait 90
-p1 PAUSE
-wait 2
-p1 0
-wait 30
-p0 PAUSE
-wait 2
-p0 0
-wait 90
-p0 PAUSE
-wait 2
-p0 0
 wait 30
 p0 UP|LEFT
 p1 UP

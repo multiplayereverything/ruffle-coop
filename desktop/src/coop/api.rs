@@ -10,7 +10,6 @@
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
 //! ExternalInterface.call("coop.ping", slot)      this PC's round trip to that player, ms (display only: differs per PC)
-//! ExternalInterface.call("coop.pause")           pauses the game for everyone (any player's Esc resumes)
 //! ExternalInterface.call("coop.events")          what happened since the last call: ["join 0", "leave 2", "chat 1 gg", ...]
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
@@ -36,7 +35,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause", "events", "chat"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat"];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;
@@ -69,9 +68,6 @@ pub struct CoopApi {
     pub buttons: [u16; MAX_PLAYERS],
     /// What happened that the game hasn't read yet (`coop.events`), oldest first.
     pub events: std::collections::VecDeque<String>,
-    /// The game asked to pause this frame (`coop.pause`), and whether it is paused.
-    pub pause_asked: bool,
-    pub paused: bool,
     /// This PC's round trip to each player in ms (differs per PC, like `local_slot`).
     pub pings: [Option<u32>; MAX_PLAYERS],
     /// The host's game settings, the same on every PC.
@@ -103,9 +99,7 @@ impl CoopApi {
             typed: Default::default(),
             options: vec![],
             pings: [None; MAX_PLAYERS],
-            pause_asked: false,
             events: Default::default(),
-            paused: false,
             frame: 0,
             typed_read_at: None,
             names: vec![],
@@ -183,10 +177,6 @@ impl CoopApi {
                 Value::String(text)
             }
             ("coop.events", _) => Value::List(self.events.drain(..).map(Value::String).collect()),
-            ("coop.pause", _) => {
-                self.pause_asked = true;
-                Value::Bool(true)
-            }
             ("coop.ping", Some(slot)) => self.pings[slot].map_or(Value::Undefined, |ms| Value::Number(ms.into())),
             ("coop.option", _) => text(0)
                 .and_then(|name| self.options.iter().find(|(n, _)| *n == name))

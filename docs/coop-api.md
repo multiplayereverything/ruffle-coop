@@ -46,13 +46,13 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.isHost` | **local** | `true` on the host's PC |
 | `coop.ping(slot)` | **local** | This PC's round trip to that player in ms (0 to itself; `undefined` until measured, about 2 s). Friend to friend goes through the host, so it's both trips added |
 | `coop.version` | shared | API version: 2 |
-| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `pause`, `events`, `chat` |
+| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat` |
 
 ### Input
 
 | Call | Kind | Answer |
 |---|---|---|
-| `coop.buttons(slot)` | shared | That player's held buttons as bits: UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ALT 32, KEY1 64, KEY2 128, KEY3 256, KEY4 512, VIEW 1024, QUIT 2048, YES 4096, NO 8192, MENU 16384, PAUSE 32768 |
+| `coop.buttons(slot)` | shared | That player's held buttons as bits: UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ALT 32, KEY1 64, KEY2 128, KEY3 256, KEY4 512, VIEW 1024, QUIT 2048, YES 4096, NO 8192, MENU 16384 |
 | `coop.button(slot, name)` | shared | `true` while that player holds the button (`"FIRE"`, `"KEY1"`...); `undefined` for an unknown name |
 | `coop.mouseX(slot)`, `coop.mouseY(slot)` | shared | That player's mouse in stage pixels (each PC's cursor goes through its own camera, so these are game coordinates). (0, 0) until it moves |
 | `coop.mouseDown(slot)` | shared | `true` while that player's left button is down |
@@ -84,12 +84,11 @@ what each name means and its default. For a launcher dropdown, list them in the 
 The camera only changes the final picture on screen: positions, hit tests, `BitmapData.draw` of the stage and
 the sync check never see it. Paths are `_root` / `_level0` / `root` and then instance names joined by dots.
 
-### Events, pause, chat
+### Events and chat
 
 | Call | Kind | Effect |
 |---|---|---|
-| `coop.events` | shared | A list of what happened since the last call, oldest first (at most 100 kept): `"join N"` (every player at the start), `"leave N"` (a friend left; from this frame they hold nothing), `"pause N"` / `"resume N"` (who pressed Esc), `"chat N text"` (a chat line). Read it once per frame |
-| `coop.pause` | shared | Pauses the game for everyone; any player's Esc resumes it |
+| `coop.events` | shared | A list of what happened since the last call, oldest first (at most 100 kept): `"join N"` (every player at the start), `"leave N"` (a friend left; from this frame they hold nothing), `"chat N text"` (a chat line). Read it once per frame |
 
 ## What every game gets without calling anything
 
@@ -97,7 +96,6 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 |---|---|
 | **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 11 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected (and the game doesn't read `coop.typed`), only characters of mapped keys reach the game, so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
-| **Pause** | Esc pauses or resumes everyone (unless the key map gives Esc to the game). The game gets no input, frames or clock while paused, and its sound stops; the window shows "Paused by Sam" |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |

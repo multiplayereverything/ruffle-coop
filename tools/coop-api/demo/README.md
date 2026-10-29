@@ -6,7 +6,7 @@ build in real windows. Run it after any change to the co-op API or the session, 
 | File | What it is |
 |---|---|
 | `CoopDemo.as`, `CoopDemo.swf` | The demo (uses `../as3/RuffleTogether.as`) |
-| `demo.keys` | Its starting key map (arrows move, Space fires, 1 key maps, 2 pause, 3 camera) |
+| `demo.keys` | Its starting key map (arrows move, Space fires, 1 key maps, 3 camera) |
 | `demo-2p.txt` | A 2-player input script, about 50 s |
 | `demo-2p-windows.txt` | The same three times after a 5 s wait, for watching real windows |
 
@@ -17,13 +17,12 @@ build in real windows. Run it after any change to the co-op API or the session, 
 - Each player's camera follows their own dot (`coop.camera`); KEY3 turns it off and on (`coop.camera(slot)`).
 - Ruffle draws `coop.name` labels above the dots, plus the name typed on the board.
 - A fixed HUD (`coop.hud`) with the frame, `version`, `players`, `has` (the made-up "teleport" says no),
-  `localSlot`, `isHost`, `ping`, `options`, each player's buttons, mouse and camera, the key map and pause.
+  `localSlot`, `isHost`, `ping`, `options`, each player's buttons, mouse and camera, and the key map.
 - Each player's mouse as a cursor (`mouseX`, `mouseY`, `mouseDown`).
 - A name board from `coop.typed` (Backspace works, Enter makes it the label).
 - KEY1 switches the game's key map with `coop.keys` (menu: FIRE = Enter, play: FIRE = Space); the HUD lists
   the key codes the game got.
-- KEY2 calls `coop.pause`; Esc (PAUSE) resumes. The events log (`coop.events`) shows join, pause, resume, chat
-  and leave.
+- The events log (`coop.events`) shows join, chat and leave.
 
 Gameplay reads only shared answers; `localSlot`, `isHost` and `ping` only reach the HUD's text.
 

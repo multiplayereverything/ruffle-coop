@@ -56,24 +56,6 @@ p1 KEY3
 wait 2
 p1 0
 wait 30
-# coop.pause from the game (KEY2), player 2's Esc (PAUSE) resumes
-p0 KEY2
-wait 2
-p0 0
-wait 90
-p1 PAUSE
-wait 2
-p1 0
-wait 30
-# Esc pause by player 1, resumed by player 1
-p0 PAUSE
-wait 2
-p0 0
-wait 90
-p0 PAUSE
-wait 2
-p0 0
-wait 30
 # a last walk: both come back near the middle of the world
 p0 UP|LEFT
 p1 UP

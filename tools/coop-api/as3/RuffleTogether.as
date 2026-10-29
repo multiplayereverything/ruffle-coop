@@ -102,10 +102,7 @@ package {
             return p == undefined ? -1 : int(p);
         }
 
-        /** Pauses the game for everyone (any player's Esc resumes). */
-        public static function pause():Boolean { return send("coop.pause") == true; }
-
-        /** What happened since the last call: ["join 0", "leave 2", "pause 1", "resume 1", "chat 1 gg", ...]. */
+        /** What happened since the last call: ["join 0", "leave 2", "chat 1 gg", ...]. */
         public static function events():Array {
             var e:* = send("coop.events");
             return e == undefined ? [] : e as Array;

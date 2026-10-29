@@ -19,17 +19,6 @@ pub struct Stepper {
     game_keys: Option<String>,
     /// What the game can ask through ExternalInterface (every slot's mouse, the players).
     api: Arc<Mutex<CoopApi>>,
-    /// Who paused the game, while it is paused.
-    paused: Option<PausedBy>,
-    /// Each slot's PAUSE button last frame, to see a new press.
-    pause_held: [bool; crate::coop::lockstep::MAX_PLAYERS],
-}
-
-/// Who paused the game: a player (Esc), or the game itself (`coop.pause`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PausedBy {
-    Player(u8),
-    Game,
 }
 
 impl Stepper {
@@ -40,8 +29,6 @@ impl Stepper {
             loaded: false,
             game_keys: None,
             api: Arc::new(Mutex::new(CoopApi::new(players, local_slot))),
-            paused: None,
-            pause_held: [false; crate::coop::lockstep::MAX_PLAYERS],
         }
     }
 
@@ -59,29 +46,6 @@ impl Stepper {
             while !player.preload(&mut ExecutionLimit::none()) {}
             self.loaded = true;
             player.set_external_interface_provider(Some(Box::new(CoopApiProvider(self.api.clone()))));
-        }
-        // a new PAUSE press by any player (the lowest slot first) pauses, or resumes, everyone
-        let mut pressed = None;
-        for (slot, input) in inputs.iter().enumerate().take(self.pause_held.len()) {
-            let held = input.buttons & crate::coop::lockstep::PAUSE != 0;
-            if held && !self.pause_held[slot] && pressed.is_none() {
-                pressed = Some(slot as u8);
-            }
-            self.pause_held[slot] = held;
-        }
-        if let Some(slot) = pressed {
-            if self.paused.is_some() {
-                self.resume(player);
-                self.add_event(format!("resume {slot}"));
-            } else {
-                self.pause(player, PausedBy::Player(slot));
-                self.add_event(format!("pause {slot}"));
-            }
-        }
-        if self.paused.is_some() {
-            // the game stands still: no input reaches it, no frame, no clock; the picture stays
-            player.render();
-            return;
         }
         // the host's mouse is always in the stage, wherever this PC's own cursor is
         // every slot's mouse, for the game's ExternalInterface calls during this frame
@@ -133,37 +97,11 @@ impl Stepper {
         player.render();
     }
 
-    /// Something the game hears through `coop.events` ("join 1", "leave 2", "resume 0"...);
+    /// Something the game hears through `coop.events` ("join 1", "leave 2", "chat 0 hi"...);
     /// every PC adds the same on the same frame.
     pub fn add_event(&mut self, event: String) {
         if let Ok(mut api) = self.api.lock() {
             api.add_event(event);
-        }
-    }
-
-    /// Who paused the game, while it is paused.
-    pub fn paused(&self) -> Option<PausedBy> {
-        self.paused
-    }
-
-    /// Stops the game for everyone: held keys are let go first (the game must not keep running
-    /// with a key down), and its sound stops.
-    fn pause(&mut self, player: &mut Player, by: PausedBy) {
-        for event in self.keys.release_all() {
-            player.handle_event(event);
-        }
-        player.audio_mut().pause();
-        self.paused = Some(by);
-        if let Ok(mut api) = self.api.lock() {
-            api.paused = true;
-        }
-    }
-
-    fn resume(&mut self, player: &mut Player) {
-        player.audio_mut().play();
-        self.paused = None;
-        if let Ok(mut api) = self.api.lock() {
-            api.paused = false;
         }
     }
 
@@ -216,11 +154,6 @@ impl Stepper {
             self.keys = game.keys();
         }
         player.set_coop_camera(api.local_camera().map(|c| (c.x, c.y, c.zoom)));
-        let pause = std::mem::take(&mut api.pause_asked);
-        drop(api);
-        if pause && self.paused.is_none() {
-            self.pause(player, PausedBy::Game);
-        }
     }
 
     /// Lets go of every key, e.g. when the session ends.
@@ -399,47 +332,6 @@ mod tests {
         stepper.step(&mut player, &[typed("!"), InputFrame::default()]);
         stepper.step(&mut player, &[InputFrame { buttons: FIRE, ..Default::default() }, InputFrame::default()]);
         assert_eq!(traces.lock().expect("traces").last().map(String::as_str), Some("Liax!"));
-    }
-
-    /// Any player's PAUSE press stops the game for everyone (no frame, no clock) until a PAUSE
-    /// press resumes it; the game then carries on exactly where it stopped. The game's own
-    /// `coop.pause` stops it too.
-    #[test]
-    fn pause_stops_the_game_and_resume_carries_on() {
-        use crate::coop::lockstep::PAUSE;
-        let Some((paused, mut paused_stepper)) = bic(0) else {
-            eprintln!("skipping: COOP_TEST_SWF not set");
-            return;
-        };
-        let (plain, mut plain_stepper) = bic(0).expect("player");
-        let (mut paused, mut plain) = (paused.lock().expect("lock"), plain.lock().expect("lock"));
-        let idle = [InputFrame::default(), InputFrame::default()];
-        let pause_by_friend = [InputFrame::default(), InputFrame { buttons: PAUSE, ..Default::default() }];
-        for _ in 0..30 {
-            paused_stepper.step(&mut paused, &idle);
-            plain_stepper.step(&mut plain, &idle);
-        }
-        let before = paused.coop_fingerprint();
-        paused_stepper.step(&mut paused, &pause_by_friend);
-        assert_eq!(paused_stepper.paused(), Some(PausedBy::Player(1)));
-        for _ in 0..20 {
-            paused_stepper.step(&mut paused, &pause_by_friend); // held: no new press
-            assert_eq!(paused.coop_fingerprint(), before, "nothing moves, the clock included");
-        }
-        paused_stepper.step(&mut paused, &idle); // let go
-        paused_stepper.step(&mut paused, &pause_by_friend); // a new press resumes
-        assert_eq!(paused_stepper.paused(), None);
-        // the resume frame already runs the game's next frame
-        plain_stepper.step(&mut plain, &idle);
-        for _ in 0..40 {
-            paused_stepper.step(&mut paused, &idle);
-            plain_stepper.step(&mut plain, &idle);
-        }
-        assert_eq!(paused.coop_fingerprint(), plain.coop_fingerprint(), "the same game, just later");
-
-        paused_stepper.api().lock().expect("api").answer("coop.pause", &[]);
-        paused_stepper.apply_game_calls(&mut paused);
-        assert_eq!(paused_stepper.paused(), Some(PausedBy::Game));
     }
 
     /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.

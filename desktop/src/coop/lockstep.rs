@@ -18,11 +18,8 @@ pub const VIEW: u16 = 1024;
 pub const QUIT: u16 = 2048;
 pub const YES: u16 = 4096;
 pub const NO: u16 = 8192;
-/// A menu key (Esc: pause, skip a cutscene), for games that need one.
+/// A menu key (Esc: the game's pause, skip a cutscene), for games that need one.
 pub const MENU: u16 = 16384;
-/// Pauses or resumes the game for everyone (Esc on every PC unless the key map gives Esc to the game,
-/// see `Game::local_buttons`).
-pub const PAUSE: u16 = 32768;
 
 /// A button by its name in input scripts and key maps (UP, FIRE, KEY1, ...; "0" is none).
 pub fn button_named(name: &str) -> Option<u16> {
@@ -43,7 +40,6 @@ pub fn button_named(name: &str) -> Option<u16> {
         "YES" => YES,
         "NO" => NO,
         "MENU" => MENU,
-        "PAUSE" => PAUSE,
         _ => return None,
     })
 }
