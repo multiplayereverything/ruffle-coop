@@ -53,6 +53,9 @@ The relay needs the `ruffle-coop` game in mods-info first.
   save, `%LOCALAPPDATA%\ruffle\SharedObjects\coop\<game file>.save` (under `--save-directory` if given), so any
   player can host next time and carry on. Solo saves are never changed. Delete the file to start the co-op game
   over. Once the games are OUT OF SYNC nothing more is saved.
+- `--coop-save coop|solo|new` (host): which save everyone starts from. `coop` (the default) is the co-op save
+  as above; `solo` is the host's solo save even if it has a co-op one; `new` starts the game as if new. With
+  `solo` or `new` the host's co-op save is replaced the first time the game saves (each friend's too).
 - One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:

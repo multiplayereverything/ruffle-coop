@@ -7,7 +7,7 @@ use crate::coop::lockstep::{InputFrame, Lockstep};
 use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
-use crate::coop::storage::{SaveGate, SessionStorage, coop_save_file};
+use crate::coop::storage::{SaveGate, SaveStart, SessionStorage, coop_save_file};
 use anyhow::{Result, anyhow, bail};
 use ruffle_core::Player;
 use ruffle_core::events::PhysicalKey;
@@ -61,6 +61,8 @@ pub struct SessionOpts {
     pub game: Game,
     /// Ruffle's save folder: the host shares its saves for this game.
     pub save_dir: Option<PathBuf>,
+    /// Host: which save the game starts from.
+    pub save_start: SaveStart,
     /// Testing: input from a script instead of the keyboard and mouse.
     pub script: Option<Script>,
     /// How long the host waits for a friend (None: until the window closes).
@@ -550,6 +552,7 @@ impl Session {
                 Some(dir) => SessionStorage::export_for_session(
                     dir,
                     &opts.swf.file_name().unwrap_or_default().to_string_lossy(),
+                    opts.save_start,
                 ),
                 None => vec![],
             };
@@ -1093,6 +1096,7 @@ mod tests {
             swf: swf.to_path_buf(),
             game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
+            save_start: SaveStart::Coop,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,
@@ -1214,7 +1218,7 @@ mod tests {
             .map(|dir| fs::read(coop_save_file(dir.path(), &name)).expect("a co-op save on every PC"))
             .collect();
         assert_eq!(saves[0], saves[1], "the same save on both PCs");
-        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dirs[1].path(), &name))
+        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dirs[1].path(), &name, SaveStart::Coop))
             .expect("valid save");
         assert_eq!(next.get(&format!("localhost/elsewhere/{name}/so_progress")), Some(vec![1, 2, 3]), "a friend can host next");
         for dir in &dirs {

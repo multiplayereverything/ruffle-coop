@@ -118,6 +118,12 @@ pub struct CoopOpt {
     #[clap(long, default_value_t = 2, help_heading = "Ruffle Together")]
     pub coop_players: u8,
 
+    /// Host: which save everyone starts from. coop: this game's co-op save (the solo save the
+    /// first time); solo: the solo save; new: no save. With solo or new, the co-op save is
+    /// replaced the first time the game saves.
+    #[clap(long, value_enum, default_value_t = storage::SaveStart::Coop, help_heading = "Ruffle Together")]
+    pub coop_save: storage::SaveStart,
+
     /// The game's keys: bad-ice-cream or gun-mayhem-2 (every player must use the same).
     #[clap(long, default_value = "bad-ice-cream", help_heading = "Ruffle Together")]
     pub coop_keys: String,

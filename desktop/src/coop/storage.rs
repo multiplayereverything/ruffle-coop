@@ -34,6 +34,18 @@ pub struct SessionStorage {
     frozen: Arc<AtomicBool>,
 }
 
+/// Host: which save the session starts from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum SaveStart {
+    /// The host's co-op save for this game, or its solo save if it has none yet.
+    #[default]
+    Coop,
+    /// The host's solo save, even if it has a co-op save.
+    Solo,
+    /// No save: the game starts as if new.
+    New,
+}
+
 /// Stops a session's co-op save from changing (once the games are out of sync).
 #[derive(Clone)]
 pub struct SaveGate(Arc<AtomicBool>);
@@ -54,8 +66,14 @@ impl SessionStorage {
         (self, gate)
     }
 
-    /// The host's saves for this game: its co-op save, or its solo save if it has none yet.
-    pub fn export_for_session(save_dir: &Path, swf_file_name: &str) -> Vec<u8> {
+    /// The host's saves for this game, as `start` picks them (see `SaveStart`). With Solo or New
+    /// the co-op save is replaced the first time the game saves.
+    pub fn export_for_session(save_dir: &Path, swf_file_name: &str, start: SaveStart) -> Vec<u8> {
+        match start {
+            SaveStart::New => return vec![],
+            SaveStart::Solo => return Self::export_from_disk(save_dir, swf_file_name),
+            SaveStart::Coop => {}
+        }
         match fs::read(coop_save_file(save_dir, swf_file_name)) {
             Ok(bytes) if Self::from_bytes(&bytes).is_some() => bytes,
             Ok(_) => {
@@ -206,7 +224,7 @@ mod tests {
         let solo = dir.path().join("localhost").join("Game.swf");
         fs::create_dir_all(&solo).expect("mkdir");
         fs::write(solo.join("so.sol"), [1]).expect("write");
-        let bytes = SessionStorage::export_for_session(dir.path(), "Game.swf");
+        let bytes = SessionStorage::export_for_session(dir.path(), "Game.swf", SaveStart::Coop);
         let (mut storage, _gate) = SessionStorage::from_bytes(&bytes)
             .expect("valid bytes")
             .with_coop_save(coop_save_file(dir.path(), "Game.swf"));
@@ -216,11 +234,29 @@ mod tests {
         storage.put("localhost//top", &[3]);
         assert_eq!(fs::read(solo.join("so.sol")).expect("solo save"), [1], "the solo save is untouched");
 
-        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf"))
+        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf", SaveStart::Coop))
             .expect("valid bytes");
         assert_eq!(next.get("localhost/y/Game.swf/so"), Some(vec![2]), "the next session continues");
         assert_eq!(next.get("localhost//top"), Some(vec![3]));
-        assert!(SessionStorage::export_for_session(dir.path(), "Other.swf").is_empty());
+        assert!(SessionStorage::export_for_session(dir.path(), "Other.swf", SaveStart::Coop).is_empty());
+    }
+
+    #[test]
+    fn the_host_can_start_from_its_solo_save_or_from_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let solo = dir.path().join("localhost").join("Game.swf");
+        fs::create_dir_all(&solo).expect("mkdir");
+        fs::write(solo.join("so.sol"), [1]).expect("write");
+        let (mut coop, _gate) = SessionStorage::default().with_coop_save(coop_save_file(dir.path(), "Game.swf"));
+        coop.put("Game.swf/so", &[2]);
+        let start = |start| {
+            SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf", start))
+                .expect("valid bytes")
+                .get("Game.swf/so")
+        };
+        assert_eq!(start(SaveStart::Coop), Some(vec![2]));
+        assert_eq!(start(SaveStart::Solo), Some(vec![1]));
+        assert_eq!(start(SaveStart::New), None);
     }
 
     #[test]
@@ -246,7 +282,7 @@ mod tests {
         let solo = dir.path().join("localhost").join("Game.swf");
         fs::create_dir_all(&solo).expect("mkdir");
         fs::write(solo.join("so.sol"), [4]).expect("write");
-        let storage = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf"))
+        let storage = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf", SaveStart::Coop))
             .expect("valid bytes");
         assert_eq!(storage.get("Game.swf/so"), Some(vec![4]));
     }
