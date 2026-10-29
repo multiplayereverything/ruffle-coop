@@ -7,7 +7,7 @@ build; only the key presses travel, and every frame runs on every PC with every 
 the same small input delay (the host picks it from the ping: 1 frame on a LAN), and the games are compared
 every 25 frames: if they ever differ, every window says so ("THE TWO GAMES ARE OUT OF SYNC: restart the level").
 
-Games with keys: Bad Ice-Cream, 2 players (`BadIceCream_coop.swf`, made by the Bad Ice-Cream mod's
+Games with keys: Territory War, 2 to 4 players hot-seat (`--coop-keys territory-war`), Bad Ice-Cream, 2 players (`BadIceCream_coop.swf`, made by the Bad Ice-Cream mod's
 `build.py --no-net`; the default), and Gun Mayhem 2, 2 to 4 players (`--coop-keys gun-mayhem-2`).
 Every player needs the **same game file** and the **same Ruffle Together build**; anything else is refused
 when they connect.

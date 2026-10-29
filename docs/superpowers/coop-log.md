@@ -188,3 +188,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   zip SHA-256 421f17fa...accf, latest, re-downloaded hash matches. Live with the downloaded exe: a solo window was
   closed by a host window started in the same cache folder (log line); the host and a friend from another folder
   met in room SVMT2 and started (4 frames, 162 ms ping).
+- Territory War key map (request from the "Territory War online mod" session): --coop-keys territory-war, hot-seat:
+  4 identical slots with SHARED keys (a game key is down while any player holds it; GameKeys.shared, events on the
+  OR of all slots). New buttons KEY1-KEY4 VIEW QUIT YES NO (bits 64..8192 of the u16 that already travels; script
+  names too). Keys: arrows, Space=FIRE, X=ALT, 1-4, V, U, Y, N (top-row digits, Standard location -> codes 49-52);
+  local keys are exactly those (no WASD). Tests first (shared keys, local keys, names, script) RED -> GREEN;
+  desktop 100/100. Replay of territory-war-279.swf 800 frames with FIRE/KEY1/VIEW twice: identical (title screen
+  only; a match needs the TW session's script). Its onSoundComplete flag only gates a sound: no fingerprint issue.
+  Not released.

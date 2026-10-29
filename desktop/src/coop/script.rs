@@ -2,13 +2,16 @@
 //!
 //! ```text
 //! # comment
-//! p0 UP|FIRE      player 0 holds these from now on (UP DOWN LEFT RIGHT FIRE ALT, or 0)
+//! p0 UP|FIRE      player 0 holds these from now on (UP DOWN LEFT RIGHT FIRE ALT KEY1-KEY4 VIEW
+//!                 QUIT YES NO, or 0)
 //! wait 25         25 frames with what is held now
 //! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
 //! move 100 50     host mouse moves (no click)
 //! ```
 
-use crate::coop::lockstep::{ALT, DOWN, FIRE, InputFrame, LEFT, MAX_PLAYERS, RIGHT, UP};
+use crate::coop::lockstep::{
+    ALT, DOWN, FIRE, InputFrame, KEY1, KEY2, KEY3, KEY4, LEFT, MAX_PLAYERS, NO, QUIT, RIGHT, UP, VIEW, YES,
+};
 
 pub struct Script {
     frames: Vec<[InputFrame; MAX_PLAYERS]>,
@@ -57,6 +60,14 @@ impl Script {
                             "RIGHT" => RIGHT,
                             "FIRE" => FIRE,
                             "ALT" => ALT,
+                            "KEY1" => KEY1,
+                            "KEY2" => KEY2,
+                            "KEY3" => KEY3,
+                            "KEY4" => KEY4,
+                            "VIEW" => VIEW,
+                            "QUIT" => QUIT,
+                            "YES" => YES,
+                            "NO" => NO,
                             _ => return Err(fail("unknown button")),
                         };
                     }
@@ -121,6 +132,8 @@ mod tests {
 
     #[test]
     fn mistakes_name_the_line() {
+        let script = Script::parse("p1 KEY1|VIEW|NO\nwait 1").expect("parses");
+        assert_eq!(script.input(0, 1).buttons, KEY1 | VIEW | NO);
         let err = Script::parse("wait 1\np0 JUMP").err().expect("an error");
         assert!(err.contains("line 2"), "{err}");
         assert!(Script::parse("p9 UP").is_err());

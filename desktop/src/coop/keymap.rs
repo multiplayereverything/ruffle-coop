@@ -1,25 +1,48 @@
 //! Keys in and out. Every player uses their own normal keys (arrows or WASD, plus the game's
 //! buttons); the session presses them on everyone's copy as that player's keys in the game.
 
-use crate::coop::lockstep::{ALT, DOWN, FIRE, LEFT, RIGHT, UP};
+use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
 use ruffle_core::PlayerEvent;
 use ruffle_core::events::{KeyDescriptor, KeyLocation, LogicalKey, NamedKey, PhysicalKey};
 use std::collections::HashSet;
+
+/// Territory War's own keys, the same for every player (hot-seat).
+fn territory_war_button(key: &PhysicalKey) -> u16 {
+    match key {
+        PhysicalKey::ArrowUp => UP,
+        PhysicalKey::ArrowDown => DOWN,
+        PhysicalKey::ArrowLeft => LEFT,
+        PhysicalKey::ArrowRight => RIGHT,
+        PhysicalKey::Space => FIRE,
+        PhysicalKey::KeyX => ALT,
+        PhysicalKey::Digit1 => KEY1,
+        PhysicalKey::Digit2 => KEY2,
+        PhysicalKey::Digit3 => KEY3,
+        PhysicalKey::Digit4 => KEY4,
+        PhysicalKey::KeyV => VIEW,
+        PhysicalKey::KeyU => QUIT,
+        PhysicalKey::KeyY => YES,
+        PhysicalKey::KeyN => NO,
+        _ => 0,
+    }
+}
 
 /// The games a session knows the keys of (`--coop-keys`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Game {
     BadIceCream,
     GunMayhem2,
+    TerritoryWar,
 }
 
 impl Game {
-    pub const NAMES: &[&str] = &["bad-ice-cream", "gun-mayhem-2"];
+    pub const NAMES: &[&str] = &["bad-ice-cream", "gun-mayhem-2", "territory-war"];
 
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "bad-ice-cream" => Some(Self::BadIceCream),
             "gun-mayhem-2" => Some(Self::GunMayhem2),
+            "territory-war" => Some(Self::TerritoryWar),
             _ => None,
         }
     }
@@ -28,6 +51,7 @@ impl Game {
         match self {
             Self::BadIceCream => "bad-ice-cream",
             Self::GunMayhem2 => "gun-mayhem-2",
+            Self::TerritoryWar => "territory-war",
         }
     }
 
@@ -41,12 +65,16 @@ impl Game {
         match self {
             Self::BadIceCream => GameKeys::bad_ice_cream(),
             Self::GunMayhem2 => GameKeys::gun_mayhem_2(),
+            Self::TerritoryWar => GameKeys::territory_war(),
         }
     }
 }
 
 /// This PC's buttons from the keys held right now.
 pub fn local_buttons(game: Game, held: &HashSet<PhysicalKey>) -> u16 {
+    if game == Game::TerritoryWar {
+        return held.iter().map(territory_war_button).fold(0, |all, button| all | button);
+    }
     let mut buttons = 0;
     for key in held {
         buttons |= match key {
@@ -65,6 +93,8 @@ pub fn local_buttons(game: Game, held: &HashSet<PhysicalKey>) -> u16 {
                     PhysicalKey::KeyX | PhysicalKey::KeyY => ALT,
                     _ => 0,
                 },
+                // handled above
+                Game::TerritoryWar => 0,
             },
         };
     }
@@ -114,6 +144,8 @@ fn character(button: u16, physical: PhysicalKey, ch: char) -> GameKey {
 pub struct GameKeys {
     slots: Vec<Vec<GameKey>>,
     held: Vec<u16>,
+    /// Every slot presses the same keys (a hot-seat game): a key is down while any player holds it.
+    shared: bool,
 }
 
 impl GameKeys {
@@ -136,6 +168,33 @@ impl GameKeys {
         Self {
             held: vec![0; 2],
             slots: vec![p1, p2],
+            shared: false,
+        }
+    }
+
+    /// Territory War (hot-seat): arrows, Space (jump, power, shoot), X (cancel the weapon), 1-4
+    /// (turn menu), V (map view), U (quit) then Y / N; every player presses the same keys.
+    pub fn territory_war() -> Self {
+        let keys = vec![
+            named(UP, PhysicalKey::ArrowUp, NamedKey::ArrowUp),
+            named(DOWN, PhysicalKey::ArrowDown, NamedKey::ArrowDown),
+            named(LEFT, PhysicalKey::ArrowLeft, NamedKey::ArrowLeft),
+            named(RIGHT, PhysicalKey::ArrowRight, NamedKey::ArrowRight),
+            character(FIRE, PhysicalKey::Space, ' '),
+            character(ALT, PhysicalKey::KeyX, 'x'),
+            character(KEY1, PhysicalKey::Digit1, '1'),
+            character(KEY2, PhysicalKey::Digit2, '2'),
+            character(KEY3, PhysicalKey::Digit3, '3'),
+            character(KEY4, PhysicalKey::Digit4, '4'),
+            character(VIEW, PhysicalKey::KeyV, 'v'),
+            character(QUIT, PhysicalKey::KeyU, 'u'),
+            character(YES, PhysicalKey::KeyY, 'y'),
+            character(NO, PhysicalKey::KeyN, 'n'),
+        ];
+        Self {
+            held: vec![0; 4],
+            slots: vec![keys; 4],
+            shared: true,
         }
     }
 
@@ -178,6 +237,7 @@ impl GameKeys {
         Self {
             held: vec![0; 4],
             slots: vec![p1, p2, p3, p4],
+            shared: false,
         }
     }
 
@@ -186,7 +246,15 @@ impl GameKeys {
         let Some(keys) = self.slots.get(slot as usize) else {
             return vec![];
         };
+        let union = |held: &[u16]| held.iter().fold(0, |all, b| all | b);
+        let before_all = union(&self.held);
         let before = std::mem::replace(&mut self.held[slot as usize], buttons);
+        // shared keys: what changes is the OR of every player's buttons
+        let (before, buttons) = if self.shared {
+            (before_all, union(&self.held))
+        } else {
+            (before, buttons)
+        };
         let mut events = vec![];
         for game_key in keys {
             let (was, is) = (before & game_key.button != 0, buttons & game_key.button != 0);
@@ -310,8 +378,49 @@ mod tests {
         assert_eq!(Game::BadIceCream.max_players(), 2);
     }
 
+    /// Territory War is hot-seat: every player presses the same keys, so a key is down while any
+    /// player holds it and released only when nobody does.
+    #[test]
+    fn territory_war_keys_are_shared_by_every_player() {
+        let mut keys = Game::TerritoryWar.keys();
+        assert_eq!(down_keys(&keys.events(0, LEFT)), vec![PhysicalKey::ArrowLeft]);
+        assert!(keys.events(1, LEFT).is_empty(), "already down");
+        assert!(keys.events(0, 0).is_empty(), "player 2 still holds it");
+        assert_eq!(up_keys(&keys.events(1, 0)), vec![PhysicalKey::ArrowLeft]);
+        let events = keys.events(2, KEY1 | VIEW);
+        let mut down = down_keys(&events);
+        down.sort_by_key(|k| *k as u32);
+        let mut expected = vec![PhysicalKey::Digit1, PhysicalKey::KeyV];
+        expected.sort_by_key(|k| *k as u32);
+        assert_eq!(down, expected);
+        // the top-row digit, not the numpad one: the game reads key code 49
+        assert!(events.iter().any(|e| matches!(e, PlayerEvent::KeyDown { key }
+            if key.logical_key == LogicalKey::Character('1') && key.key_location == KeyLocation::Standard)));
+        assert_eq!(Game::TerritoryWar.max_players(), 4);
+    }
+
+    #[test]
+    fn territory_war_local_keys() {
+        let tw = Game::TerritoryWar;
+        for (key, button) in [
+            (PhysicalKey::ArrowUp, UP),
+            (PhysicalKey::Space, FIRE),
+            (PhysicalKey::KeyX, ALT),
+            (PhysicalKey::Digit1, KEY1),
+            (PhysicalKey::Digit4, KEY4),
+            (PhysicalKey::KeyV, VIEW),
+            (PhysicalKey::KeyU, QUIT),
+            (PhysicalKey::KeyY, YES),
+            (PhysicalKey::KeyN, NO),
+            (PhysicalKey::KeyW, 0),
+        ] {
+            assert_eq!(local_buttons(tw, &held(&[key])), button, "{key:?}");
+        }
+    }
+
     #[test]
     fn games_by_name() {
+        assert_eq!(Game::from_name("territory-war"), Some(Game::TerritoryWar));
         assert_eq!(Game::from_name("bad-ice-cream"), Some(Game::BadIceCream));
         assert_eq!(Game::from_name("gun-mayhem-2"), Some(Game::GunMayhem2));
         assert_eq!(Game::from_name("pong"), None);

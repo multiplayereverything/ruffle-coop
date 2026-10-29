@@ -8,6 +8,15 @@ pub const LEFT: u16 = 4;
 pub const RIGHT: u16 = 8;
 pub const FIRE: u16 = 16;
 pub const ALT: u16 = 32;
+/// More buttons for games with more keys (Territory War: the turn menu's 1-4, view, quit, yes, no).
+pub const KEY1: u16 = 64;
+pub const KEY2: u16 = 128;
+pub const KEY3: u16 = 256;
+pub const KEY4: u16 = 512;
+pub const VIEW: u16 = 1024;
+pub const QUIT: u16 = 2048;
+pub const YES: u16 = 4096;
+pub const NO: u16 = 8192;
 
 /// Up to 4 players (v1 plays 2).
 pub const MAX_PLAYERS: usize = 4;
