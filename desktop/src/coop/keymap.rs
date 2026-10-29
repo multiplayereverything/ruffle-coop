@@ -29,6 +29,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("intrusion", include_str!("keys/intrusion.keys")),
     ("intrusion-2", include_str!("keys/intrusion-2.keys")),
     ("air-battle", include_str!("keys/air-battle.keys")),
+    ("ultimate-crab-battle", include_str!("keys/ultimate-crab-battle.keys")),
 ];
 
 /// A game's key map (`--coop-keys`).
@@ -281,7 +282,7 @@ impl GameKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
+    use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
 
     fn game(name: &str) -> Game {
         Game::built_in(name).expect("built in")
@@ -491,6 +492,61 @@ mod tests {
         assert_eq!(bm.local_buttons(&held(&[PhysicalKey::KeyS])), DOWN);
         for fire in [PhysicalKey::Space, PhysicalKey::Enter, PhysicalKey::KeyF] {
             assert_eq!(bm.local_buttons(&held(&[fire])), FIRE);
+        }
+    }
+
+    /// Ultimate Crab Battle: each player has their own move + fire keys (P4 on the numpad), and
+    /// every player also presses 1-3, Ctrl, Y and N.
+    #[test]
+    fn ultimate_crab_battle_keys() {
+        let ucb = game("ultimate-crab-battle");
+        assert_eq!(ucb.max_players(), 4);
+        let mut keys = ucb.keys();
+        for (slot, buttons, expected) in [
+            (0, UP | FIRE, vec![PhysicalKey::ArrowUp, PhysicalKey::KeyA]),
+            (1, LEFT | FIRE, vec![PhysicalKey::KeyJ, PhysicalKey::KeyU]),
+            (2, DOWN | FIRE, vec![PhysicalKey::KeyG, PhysicalKey::KeyR]),
+            (3, UP | FIRE, vec![PhysicalKey::Numpad8, PhysicalKey::Numpad0]),
+        ] {
+            let mut down = down_keys(&keys.events(slot, buttons));
+            down.sort_by_key(|k| *k as u32);
+            let mut expected = expected;
+            expected.sort_by_key(|k| *k as u32);
+            assert_eq!(down, expected, "slot {slot}");
+        }
+        for slot in 0..4 {
+            let events = keys.events(slot, KEY1 | KEY2 | KEY3 | ALT | YES | NO);
+            let mut down = down_keys(&events);
+            down.sort_by_key(|k| *k as u32);
+            let mut expected = vec![
+                PhysicalKey::Digit1,
+                PhysicalKey::Digit2,
+                PhysicalKey::Digit3,
+                PhysicalKey::ControlLeft,
+                PhysicalKey::KeyY,
+                PhysicalKey::KeyN,
+            ];
+            expected.sort_by_key(|k| *k as u32);
+            assert_eq!(down, expected, "slot {slot}");
+            // the top-row digit the game reads as key code 49, not the numpad one
+            assert!(events.iter().any(|e| matches!(e, PlayerEvent::KeyDown { key }
+                if key.logical_key == LogicalKey::Character('1') && key.key_location == KeyLocation::Standard)));
+        }
+        for (key, button) in [
+            (PhysicalKey::ArrowLeft, LEFT),
+            (PhysicalKey::KeyW, UP),
+            (PhysicalKey::KeyD, RIGHT),
+            (PhysicalKey::KeyA, 0),
+            (PhysicalKey::Space, FIRE),
+            (PhysicalKey::Enter, FIRE),
+            (PhysicalKey::KeyZ, FIRE),
+            (PhysicalKey::KeyF, FIRE),
+            (PhysicalKey::ControlLeft, ALT),
+            (PhysicalKey::Digit3, KEY3),
+            (PhysicalKey::KeyY, YES),
+            (PhysicalKey::KeyN, NO),
+        ] {
+            assert_eq!(ucb.local_buttons(&held(&[key])), button, "{key:?}");
         }
     }
 
