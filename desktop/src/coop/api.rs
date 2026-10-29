@@ -6,16 +6,44 @@
 //! ExternalInterface.call("coop.mouseX", slot)    that slot's mouse, stage pixels (same space as _root._xmouse)
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
+//! ExternalInterface.call("coop.version")         the API version (2)
+//! ExternalInterface.call("coop.has", feature)    true if this build has the feature ("camera", "keys", ...)
+//! ExternalInterface.call("coop.name", slot)      that player's name
+//! ExternalInterface.call("coop.isHost")          true on the host's PC (like localSlot: never for gameplay)
+//! ExternalInterface.call("coop.camera", slot, x, y, zoom)  that slot's camera; (slot) alone turns it off
+//! ExternalInterface.call("coop.hud", path)       that clip is drawn without the camera
+//! ExternalInterface.call("coop.label", slot, path, text)   a name tag above that clip ("" removes it)
+//! ExternalInterface.call("coop.keys", text)      the game's own key map (.keys format), from the next frame
 //! ```
 //!
-//! Every answer except `localSlot` is the same on every PC for the same frame (the mice travel
-//! with the other inputs). Outside a session there is no provider: `ExternalInterface.available`
-//! is false (or the call returns null), so a game falls back to its normal mouse and slot 0.
+//! Every answer except `localSlot` and `isHost` is the same on every PC for the same frame (the mice
+//! travel with the other inputs). The camera, HUD and labels only change the picture on each PC.
+//! Outside a session there is no provider: `ExternalInterface.available` is false (or the call
+//! returns null), so a game falls back to its normal mouse, slot 0 and no camera.
 
 use crate::coop::lockstep::{InputFrame, MAX_PLAYERS};
 use ruffle_core::context::UpdateContext;
 use ruffle_core::external::{ExternalInterfaceProvider, Value};
 use std::sync::{Arc, Mutex};
+
+pub const VERSION: u8 = 2;
+/// What `coop.has` says yes to.
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys"];
+
+/// A slot's camera: the stage point (x, y), in stage pixels, shown at the centre of the screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+/// A name tag that Ruffle draws above a clip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    pub path: String,
+    pub text: String,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoopApi {
@@ -23,6 +51,13 @@ pub struct CoopApi {
     pub local_slot: u8,
     /// Each slot's mouse (stage twips) and left button, as of the frame that runs now.
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
+    pub names: Vec<String>,
+    pub cameras: [Option<Camera>; MAX_PLAYERS],
+    pub labels: [Option<Label>; MAX_PLAYERS],
+    /// A key map the game gave this frame, for the Stepper to switch to.
+    pub keys: Option<String>,
+    /// HUD clips the game named this frame, for the provider to mark.
+    pub hud: Vec<String>,
     /// Names the game called (tests check that AS2 and AS3 calls arrive).
     #[cfg(test)]
     pub calls: Vec<String>,
@@ -34,6 +69,11 @@ impl CoopApi {
             players,
             local_slot,
             mouse: [(0, 0, false); MAX_PLAYERS],
+            names: vec![],
+            cameras: [None; MAX_PLAYERS],
+            labels: Default::default(),
+            keys: None,
+            hud: vec![],
             #[cfg(test)]
             calls: vec![],
         }
@@ -48,17 +88,76 @@ impl CoopApi {
         }
     }
 
-    pub fn answer(&self, name: &str, args: &[Value]) -> Value {
-        let slot = || match args.first() {
+    /// The camera this PC draws with.
+    pub fn local_camera(&self) -> Option<Camera> {
+        self.cameras[self.local_slot as usize]
+    }
+
+    pub fn answer(&mut self, name: &str, args: &[Value]) -> Value {
+        let slot = match args.first() {
             Some(Value::Number(n)) if *n >= 0.0 && (*n as usize) < self.players as usize => Some(*n as usize),
             _ => None,
         };
-        match (name, slot()) {
+        let number = |i: usize| match args.get(i) {
+            Some(Value::Number(n)) if n.is_finite() => Some(*n),
+            _ => None,
+        };
+        let text = |i: usize| match args.get(i) {
+            Some(Value::String(s)) => Some(s.clone()),
+            _ => None,
+        };
+        match (name, slot) {
             ("coop.players", _) => Value::Number(self.players.into()),
             ("coop.localSlot", _) => Value::Number(self.local_slot.into()),
             ("coop.mouseX", Some(slot)) => Value::Number(self.mouse[slot].0 as f64 / 20.0),
             ("coop.mouseY", Some(slot)) => Value::Number(self.mouse[slot].1 as f64 / 20.0),
             ("coop.mouseDown", Some(slot)) => Value::Bool(self.mouse[slot].2),
+            ("coop.version", _) => Value::Number(VERSION.into()),
+            ("coop.has", _) => Value::Bool(text(0).is_some_and(|f| FEATURES.contains(&f.as_str()))),
+            ("coop.name", Some(slot)) => self.names.get(slot).map_or(Value::Undefined, |n| Value::String(n.clone())),
+            ("coop.isHost", _) => Value::Bool(self.local_slot == 0),
+            ("coop.camera", Some(slot)) => match (number(1), number(2), number(3).unwrap_or(1.0)) {
+                (Some(x), Some(y), zoom) if zoom > 0.0 => {
+                    self.cameras[slot] = Some(Camera { x, y, zoom });
+                    Value::Bool(true)
+                }
+                (None, None, _) if args.len() == 1 => {
+                    self.cameras[slot] = None;
+                    Value::Bool(true)
+                }
+                _ => Value::Bool(false),
+            },
+            ("coop.hud", _) => match text(0) {
+                Some(path) => {
+                    self.hud.push(path);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.label", Some(slot)) => match (text(1), text(2).unwrap_or_default()) {
+                (Some(_), text) if text.is_empty() => {
+                    self.labels[slot] = None;
+                    Value::Bool(true)
+                }
+                (Some(path), text) => {
+                    self.labels[slot] = Some(Label { path, text });
+                    Value::Bool(true)
+                }
+                _ => Value::Bool(false),
+            },
+            ("coop.keys", _) => match text(0) {
+                Some(keys) => match crate::coop::keymap::Game::parse("game", &keys) {
+                    Ok(_) => {
+                        self.keys = Some(keys);
+                        Value::Bool(true)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Ruffle Together: the game's key map is wrong: {e}");
+                        Value::Bool(false)
+                    }
+                },
+                None => Value::Bool(false),
+            },
             _ => Value::Undefined,
         }
     }
@@ -68,12 +167,19 @@ impl CoopApi {
 pub struct CoopApiProvider(pub Arc<Mutex<CoopApi>>);
 
 impl ExternalInterfaceProvider for CoopApiProvider {
-    fn call_method(&self, _context: &mut UpdateContext<'_>, name: &str, args: &[Value]) -> Value {
+    fn call_method(&self, context: &mut UpdateContext<'_>, name: &str, args: &[Value]) -> Value {
+        let Ok(mut api) = self.0.lock() else {
+            return Value::Undefined;
+        };
         #[cfg(test)]
-        if let Ok(mut api) = self.0.lock() {
-            api.calls.push(name.to_string());
+        api.calls.push(name.to_string());
+        let answer = api.answer(name, args);
+        for path in std::mem::take(&mut api.hud) {
+            if !ruffle_core::coop_view::set_hud(context, &path) {
+                tracing::warn!("Ruffle Together: coop.hud: no clip at {path}");
+            }
         }
-        self.0.lock().map_or(Value::Undefined, |api| api.answer(name, args))
+        answer
     }
 
     fn on_callback_available(&self, _name: &str) {}
@@ -87,6 +193,14 @@ impl ExternalInterfaceProvider for CoopApiProvider {
 mod tests {
     use super::*;
 
+    fn n(v: f64) -> Value {
+        Value::Number(v)
+    }
+
+    fn s(v: &str) -> Value {
+        Value::String(v.into())
+    }
+
     #[test]
     fn answers_in_stage_pixels_per_slot() {
         let mut api = CoopApi::new(3, 2);
@@ -95,7 +209,6 @@ mod tests {
             InputFrame { buttons: 0, mouse: Some((200, 300, true)) },
             InputFrame::default(),
         ]);
-        let n = |v: f64| Value::Number(v);
         assert_eq!(api.answer("coop.players", &[]), n(3.0));
         assert_eq!(api.answer("coop.localSlot", &[]), n(2.0));
         assert_eq!(api.answer("coop.mouseX", &[n(0.0)]), n(100.0));
@@ -108,5 +221,58 @@ mod tests {
         // no mouse this frame: the last one stays
         api.update(&[InputFrame::default(), InputFrame::default(), InputFrame::default()]);
         assert_eq!(api.answer("coop.mouseX", &[n(0.0)]), n(100.0));
+    }
+
+    #[test]
+    fn version_features_names_and_host() {
+        let mut api = CoopApi::new(2, 1);
+        api.names = vec!["Liam".into(), "Sam".into()];
+        assert_eq!(api.answer("coop.version", &[]), n(2.0));
+        assert_eq!(api.answer("coop.has", &[s("camera")]), Value::Bool(true));
+        assert_eq!(api.answer("coop.has", &[s("keys")]), Value::Bool(true));
+        assert_eq!(api.answer("coop.has", &[s("teleport")]), Value::Bool(false));
+        assert_eq!(api.answer("coop.has", &[]), Value::Bool(false));
+        assert_eq!(api.answer("coop.name", &[n(1.0)]), s("Sam"));
+        assert_eq!(api.answer("coop.name", &[n(2.0)]), Value::Undefined);
+        assert_eq!(api.answer("coop.isHost", &[]), Value::Bool(false));
+        assert_eq!(CoopApi::new(2, 0).answer("coop.isHost", &[]), Value::Bool(true));
+    }
+
+    #[test]
+    fn every_slot_has_a_camera_and_this_pc_draws_its_own() {
+        let mut api = CoopApi::new(2, 1);
+        assert_eq!(api.local_camera(), None);
+        assert_eq!(api.answer("coop.camera", &[n(0.0), n(100.0), n(50.0), n(2.0)]), Value::Bool(true));
+        assert_eq!(api.answer("coop.camera", &[n(1.0), n(300.0), n(40.0)]), Value::Bool(true));
+        assert_eq!(api.cameras[0], Some(Camera { x: 100.0, y: 50.0, zoom: 2.0 }));
+        assert_eq!(api.local_camera(), Some(Camera { x: 300.0, y: 40.0, zoom: 1.0 }), "zoom 1 by default");
+        assert_eq!(api.answer("coop.camera", &[n(1.0)]), Value::Bool(true));
+        assert_eq!(api.local_camera(), None, "(slot) alone turns it off");
+        assert_eq!(api.answer("coop.camera", &[n(0.0), n(1.0), n(1.0), n(0.0)]), Value::Bool(false), "zoom 0");
+        assert_eq!(api.answer("coop.camera", &[n(0.0), n(1.0)]), Value::Bool(false), "x without y");
+        assert_eq!(api.answer("coop.camera", &[n(2.0), n(1.0), n(1.0)]), Value::Undefined, "no slot 2");
+    }
+
+    #[test]
+    fn labels_and_hud_paths() {
+        let mut api = CoopApi::new(2, 0);
+        assert_eq!(api.answer("coop.label", &[n(1.0), s("_root.p2"), s("Sam")]), Value::Bool(true));
+        assert_eq!(api.labels[1], Some(Label { path: "_root.p2".into(), text: "Sam".into() }));
+        assert_eq!(api.answer("coop.label", &[n(1.0), s("_root.p2"), s("")]), Value::Bool(true));
+        assert_eq!(api.labels[1], None);
+        assert_eq!(api.answer("coop.label", &[n(1.0)]), Value::Bool(false), "no path");
+        assert_eq!(api.answer("coop.hud", &[s("_root.hud")]), Value::Bool(true));
+        assert_eq!(api.hud, vec!["_root.hud".to_string()]);
+        assert_eq!(api.answer("coop.hud", &[]), Value::Bool(false));
+    }
+
+    #[test]
+    fn the_game_can_give_its_own_key_map() {
+        let mut api = CoopApi::new(2, 0);
+        assert_eq!(api.answer("coop.keys", &[s("slot 0: FIRE=32\nslot 1: FIRE=13")]), Value::Bool(true));
+        assert_eq!(api.keys.as_deref(), Some("slot 0: FIRE=32\nslot 1: FIRE=13"));
+        api.keys = None;
+        assert_eq!(api.answer("coop.keys", &[s("slot 0: JUMP=32")]), Value::Bool(false), "unknown button");
+        assert_eq!(api.keys, None);
     }
 }

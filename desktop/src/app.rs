@@ -431,6 +431,8 @@ impl MainWindow {
                 tracing::info!("{title}");
                 self.gui.window().set_title(&title);
                 self.coop_title = title;
+                let (details, state) = session.presence();
+                crate::coop::discord::show(&details, &state);
             }
             self.next_frame_time = Some(Instant::now() + std::time::Duration::from_millis(2));
         } else if matches!(self.loaded, LoadingState::Loaded) {

@@ -115,6 +115,8 @@ pub struct Session {
     lockstep: Lockstep,
     stepper: Stepper,
     game: Game,
+    /// The game's file name without `.swf`, for Discord.
+    swf_name: String,
     local_index: u8,
     names: Vec<String>,
     /// Connection number -> player slot of the session's players (see `from` in net events).
@@ -609,7 +611,9 @@ impl Session {
             .iter()
             .position(|(id, _)| *id == my_id)
             .ok_or_else(|| anyhow!("the game started without you (the room is full)"))? as u8;
-        let names = players.into_iter().map(|(_, name)| name).collect();
+        let names: Vec<String> = players.into_iter().map(|(_, name)| name).collect();
+        let mut stepper = Stepper::new(opts.game.keys(), player_count, your_index);
+        stepper.set_names(&names);
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
         tracing::info!(
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
@@ -624,8 +628,9 @@ impl Session {
         Ok(Session {
             link,
             lockstep: Lockstep::new(player_count, your_index, delay),
-            stepper: Stepper::new(opts.game.keys(), player_count, your_index),
+            stepper,
             game: opts.game.clone(),
+            swf_name: opts.swf.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
             local_index: your_index,
             peers,
             hosting,
@@ -948,11 +953,22 @@ impl Session {
     }
 
     /// The next frame to run (for logs).
+    /// The name tags the game asked for (`coop.label`), for the window to draw.
+    pub fn labels(&self) -> Vec<crate::coop::api::Label> {
+        self.stepper.labels()
+    }
+
     pub fn frames_run(&self) -> u32 {
         self.lockstep.frame()
     }
 
     /// What the window title shows.
+    /// What Discord shows: the game, then the room (or direct) and how many play.
+    pub fn presence(&self) -> (String, String) {
+        let where_ = self.room.as_ref().map_or("direct game".to_string(), |code| format!("room {code}"));
+        (format!("Playing {}", self.swf_name), format!("{where_}, {} players", self.names.len()))
+    }
+
     pub fn title(&self) -> String {
         let mut title = String::from("Ruffle Together");
         if let Some(code) = &self.room {

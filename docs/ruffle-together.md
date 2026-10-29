@@ -87,6 +87,20 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 | `ExternalInterface.call("coop.mouseX", slot)` | that slot's mouse x, in stage pixels (the same space as `_root._xmouse` / `stage.mouseX`) |
 | `ExternalInterface.call("coop.mouseY", slot)` | that slot's mouse y |
 | `ExternalInterface.call("coop.mouseDown", slot)` | `true` while that slot's left mouse button is down |
+| `ExternalInterface.call("coop.version")` | the API version (2) |
+| `ExternalInterface.call("coop.has", feature)` | `true` if this build has the feature: `"camera"`, `"hud"`, `"label"`, `"keys"`, `"name"`, `"mouse"` |
+| `ExternalInterface.call("coop.name", slot)` | that player's name |
+| `ExternalInterface.call("coop.isHost")` | `true` on the host's PC. **Never for gameplay**, like `localSlot` |
+| `ExternalInterface.call("coop.camera", slot, x, y, zoom)` | sets that slot's camera: stage point (x, y) at the middle of that player's screen, `zoom` 1 = normal. `("coop.camera", slot)` turns it off |
+| `ExternalInterface.call("coop.hud", path)` | the clip at `path` (e.g. `"_root.hud"`) is drawn without the camera |
+| `ExternalInterface.call("coop.label", slot, path, text)` | a name tag above the clip at `path`, on every PC; `""` removes it |
+| `ExternalInterface.call("coop.keys", text)` | the game's own key map (the `.keys` format below), used from the next frame |
+
+**Easier: the helper library.** `tools/coop-api/as2/RuffleTogether.as` (AS2, any SWF version: it does the
+SWF 6/7 unhide step for you) and `tools/coop-api/as3/RuffleTogether.as` (AS3) wrap every call:
+`RuffleTogether.active()`, `players()`, `localSlot()`, `name(slot)`, `has("camera")`, `mouseX(slot)`,
+`camera(slot, x, y, zoom)`, `hud(path)`, `label(slot, path, text)`, `keys(text)`. Outside Ruffle Together they
+fall back to single-player answers (1 player, slot 0, no camera), so one SWF works everywhere.
 
 - **In co-op or not:** `ExternalInterface.available && ExternalInterface.call("coop.players") > 0`. In plain Ruffle
   or Flash Player this is false: use the normal mouse and treat this PC as slot 0.
@@ -102,8 +116,19 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 - **`localSlot` rule:** it is different on every PC, so nothing the game simulates may depend on it, and it must
   not move, show/hide, create or remove display objects: the sync check compares every object's position,
   visibility, depth and frame on every PC, and a difference shows OUT OF SYNC. Safe: the text of a text field that
-  exists on every PC (for example "YOU" over your player), colour/alpha tints, sounds. A camera that follows the
-  local player is not supported (it would also change hit tests).
+  exists on every PC (for example "YOU" over your player), colour/alpha tints, sounds. Don't move the world to
+  follow the local player: use `coop.camera` instead.
+- **Cameras (one per player):** call `coop.camera` for **every** slot each frame (or whenever it changes), not
+  just your own: every PC then holds the same cameras, and each PC draws with its own slot's. The camera only
+  changes the picture on screen; the game itself (positions, hit tests, `BitmapData.draw` of the stage, the sync
+  check) never sees it. Each PC's mouse goes through its own camera, so `coop.mouseX/Y(slot)` and the host's
+  normal mouse stay in game coordinates.
+- **HUD:** mark score bars and menus with `coop.hud(path)` so they stay put. A HUD clip must be a direct child of
+  the root (`_root.hud`, `root.hud`); the mark lasts as long as the clip.
+- **Labels:** Ruffle draws them over the game (white text with a shadow, centred above the clip's top edge),
+  following each PC's camera; the game never sees them. Paths are `_root` / `root` then instance names with dots.
+- **`coop.keys`:** the map replaces `--coop-keys` from the next frame, on every PC at once (held keys are let go
+  first; the same map again changes nothing). A game can switch maps per mode, e.g. menus vs. a match.
 - In a session `ExternalInterface.available` is true and every other call returns undefined; there is no
   JavaScript.
 - Input scripts drive any slot's mouse: `move X Y slot`, `click X Y slot` (the host's when the slot is left out).

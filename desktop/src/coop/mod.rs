@@ -2,6 +2,7 @@
 //! Every PC runs the same game; only inputs travel, and a frame runs once all players' inputs for it are in.
 
 pub mod api;
+pub mod discord;
 pub mod frame;
 pub mod keymap;
 pub mod lockstep;

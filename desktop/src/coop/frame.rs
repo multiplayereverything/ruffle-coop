@@ -3,7 +3,7 @@
 //! and timers and the frame clock move by exactly one frame each time.
 
 use crate::coop::api::{CoopApi, CoopApiProvider};
-use crate::coop::keymap::GameKeys;
+use crate::coop::keymap::{Game, GameKeys};
 use crate::coop::lockstep::InputFrame;
 use ruffle_core::events::MouseButton;
 use ruffle_core::limits::ExecutionLimit;
@@ -15,6 +15,8 @@ pub struct Stepper {
     keys: GameKeys,
     mouse: Option<(i32, i32, bool)>,
     loaded: bool,
+    /// The key map the game gave with `coop.keys`, if it gave one.
+    game_keys: Option<String>,
     /// What the game can ask through ExternalInterface (every slot's mouse, the players).
     api: Arc<Mutex<CoopApi>>,
 }
@@ -25,6 +27,7 @@ impl Stepper {
             keys,
             mouse: None,
             loaded: false,
+            game_keys: None,
             api: Arc::new(Mutex::new(CoopApi::new(players, local_slot))),
         }
     }
@@ -82,11 +85,44 @@ impl Stepper {
         let frame = Duration::from_secs_f64(1.0 / player.frame_rate());
         player.run_frame();
         player.update_timers(FloatDuration::from_std(frame));
+        self.apply_game_calls(player);
         player.audio_mut().tick();
         player.advance_frame_clock(frame);
         // rendering has side effects on the game (e.g. scrollRect updates), so it happens
         // exactly once per frame on every PC
         player.render();
+    }
+
+    /// Every player's name, for `coop.name`.
+    pub fn set_names(&mut self, names: &[String]) {
+        if let Ok(mut api) = self.api.lock() {
+            api.names = names.to_vec();
+        }
+    }
+
+    /// The labels the game asked for, for the window to draw.
+    pub fn labels(&self) -> Vec<crate::coop::api::Label> {
+        self.api.lock().map(|api| api.labels.iter().flatten().cloned().collect()).unwrap_or_default()
+    }
+
+    /// What the game asked for during the frame (its scripts and timers): its own key map (every
+    /// PC switches on the same frame, since every PC runs the same calls; the same map again
+    /// changes nothing) and this PC's camera.
+    fn apply_game_calls(&mut self, player: &mut Player) {
+        let Ok(mut api) = self.api.lock() else {
+            return;
+        };
+        if let Some(text) = api.keys.take()
+            && self.game_keys.as_ref() != Some(&text)
+            && let Ok(game) = Game::parse("game", &text)
+        {
+            self.game_keys = Some(text);
+            for event in self.keys.release_all() {
+                player.handle_event(event);
+            }
+            self.keys = game.keys();
+        }
+        player.set_coop_camera(api.local_camera().map(|c| (c.x, c.y, c.zoom)));
     }
 
     /// Lets go of every key, e.g. when the session ends.
@@ -101,8 +137,10 @@ impl Stepper {
 mod tests {
     use super::*;
     use crate::coop::keymap::Game;
-    use crate::coop::lockstep::UP;
+    use crate::coop::api::Camera;
+    use crate::coop::lockstep::{FIRE, UP};
     use ruffle_core::PlayerBuilder;
+    use ruffle_core::external::Value;
     use ruffle_core::frame_clock::FrameClock;
     use std::sync::{Arc, Mutex};
 
@@ -235,5 +273,119 @@ mod tests {
         let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
         stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
         assert!(player.preload(&mut ruffle_core::limits::ExecutionLimit::exhausted()));
+    }
+
+    /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.
+    fn bic(local_slot: u8) -> Option<(Arc<Mutex<Player>>, Stepper)> {
+        let swf = std::env::var("COOP_TEST_SWF").ok()?;
+        let player = crate::coop::replay::headless_player(
+            std::path::Path::new(&swf),
+            Some(Arc::new(Mutex::new(FrameClock::new(1_700_000_000_000)))),
+            crate::coop::storage::SessionStorage::default(),
+        )
+        .expect("player");
+        let keys = Game::built_in("bad-ice-cream").expect("built in").keys();
+        Some((player, Stepper::new(keys, 2, local_slot)))
+    }
+
+    fn set_cameras(stepper: &Stepper, cameras: [Option<Camera>; 2]) {
+        let mut api = stepper.api().lock().expect("api");
+        api.cameras[..2].copy_from_slice(&cameras);
+    }
+
+    /// The share of pixels that differ between two pictures of the same size.
+    fn differ(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
+        assert_eq!(a.dimensions(), b.dimensions());
+        let changed = a.pixels().zip(b.pixels()).filter(|(p, q)| p != q).count();
+        changed as f64 / (a.width() * a.height()) as f64
+    }
+
+    /// Every slot has its own camera and each PC draws with its own: the pictures differ, the
+    /// game (its fingerprint) doesn't. A HUD clip is drawn as if there were no camera.
+    #[test]
+    fn cameras_change_the_picture_not_the_game() {
+        let Some((host, mut host_stepper)) = bic(0) else {
+            eprintln!("skipping: COOP_TEST_SWF not set");
+            return;
+        };
+        let (friend, mut friend_stepper) = bic(1).expect("player");
+        let (plain, mut plain_stepper) = bic(0).expect("player");
+        let cameras = [
+            Some(Camera { x: 100.0, y: 100.0, zoom: 2.0 }),
+            Some(Camera { x: 400.0, y: 300.0, zoom: 1.5 }),
+        ];
+        set_cameras(&host_stepper, cameras);
+        set_cameras(&friend_stepper, cameras);
+        let (mut host, mut friend, mut plain) =
+            (host.lock().expect("lock"), friend.lock().expect("lock"), plain.lock().expect("lock"));
+        let inputs = [InputFrame { buttons: UP, mouse: None }, InputFrame::default()];
+        for frame in 0..120 {
+            host_stepper.step(&mut host, &inputs);
+            friend_stepper.step(&mut friend, &inputs);
+            plain_stepper.step(&mut plain, &inputs);
+            let print = plain.coop_fingerprint();
+            assert_eq!(host.coop_fingerprint(), print, "host, frame {frame}");
+            assert_eq!(friend.coop_fingerprint(), print, "friend, frame {frame}");
+        }
+        let capture = crate::coop::replay::capture;
+        let (host_picture, friend_picture, plain_picture) = (
+            capture(&mut host).expect("capture"),
+            capture(&mut friend).expect("capture"),
+            capture(&mut plain).expect("capture"),
+        );
+        assert!(differ(&host_picture, &plain_picture) > 0.2, "the host's camera moved the picture");
+        assert!(differ(&friend_picture, &host_picture) > 0.2, "each PC draws its own slot's camera");
+
+        // the whole root as HUD: drawn without the camera, so like no camera at all
+        host.mutate_with_update_context(|context| {
+            assert!(ruffle_core::coop_view::set_hud(context, "_root"));
+        });
+        let hud_picture = capture(&mut host).expect("capture");
+        assert!(differ(&hud_picture, &plain_picture) < 0.01, "{}", differ(&hud_picture, &plain_picture));
+        assert_eq!(host.coop_fingerprint(), plain.coop_fingerprint(), "HUD doesn't touch the game");
+    }
+
+    /// This PC's cursor reaches the game through its camera: the middle of the window is the
+    /// point the camera looks at, in stage twips, on every PC.
+    #[test]
+    fn the_mouse_goes_through_the_camera() {
+        let Some((player, mut stepper)) = bic(0) else {
+            eprintln!("skipping: COOP_TEST_SWF not set");
+            return;
+        };
+        set_cameras(&stepper, [Some(Camera { x: 100.0, y: 50.0, zoom: 2.0 }), None]);
+        let mut player = player.lock().expect("lock");
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
+        let (width, height) = (player.movie_width() as f64, player.movie_height() as f64);
+        let (x, y) = player.viewport_to_stage(width / 2.0, height / 2.0);
+        assert!((x - 2000).abs() <= 1 && (y - 1000).abs() <= 1, "({x}, {y})");
+        let label = player.coop_label_position("_root").expect("the root is on show");
+        player.set_coop_camera(None);
+        assert_ne!(player.coop_label_position("_root"), Some(label), "labels follow the camera");
+    }
+
+    /// `coop.keys`: the game's own map is used from the next frame, held keys are let go first,
+    /// and giving the same map again (every frame, say) changes nothing.
+    #[test]
+    fn the_game_can_switch_the_key_map() {
+        let player = PlayerBuilder::new().build();
+        let mut player = player.lock().expect("player");
+        let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
+        let map = "slot 0: FIRE=65\nslot 1: FIRE=66";
+        let give = |stepper: &Stepper| {
+            let answer = stepper.api().lock().expect("api").answer("coop.keys", &[Value::String(map.into())]);
+            assert_eq!(answer, Value::Bool(true));
+        };
+        give(&stepper);
+        let fire = [InputFrame { buttons: FIRE, mouse: None }, InputFrame::default()];
+        stepper.step(&mut player, &fire); // the switch happens at the end of this frame
+        assert_eq!(stepper.game_keys.as_deref(), Some(map));
+        // the new map: slot 0's FIRE is A now (it was Space), and nothing is held yet
+        let events = stepper.keys.events(0, FIRE);
+        assert!(matches!(events.first(), Some(PlayerEvent::KeyDown { key })
+            if key.physical_key == ruffle_core::events::PhysicalKey::KeyA), "{events:?}");
+        give(&stepper);
+        stepper.step(&mut player, &fire);
+        assert!(stepper.keys.events(0, FIRE).is_empty(), "FIRE stays held: the same map didn't reset it");
     }
 }

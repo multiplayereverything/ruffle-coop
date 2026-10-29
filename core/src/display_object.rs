@@ -896,6 +896,14 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.set_flag(DisplayObjectFlags::HAS_EXPLICIT_NAME, value);
     }
 
+    fn is_coop_hud(&self) -> bool {
+        self.contains_flag(DisplayObjectFlags::COOP_HUD)
+    }
+
+    fn set_coop_hud(&self, value: bool) {
+        self.set_flag(DisplayObjectFlags::COOP_HUD, value);
+    }
+
     fn masker(&self) -> Option<DisplayObject<'gc>> {
         self.masker.get()
     }
@@ -976,7 +984,13 @@ pub fn render_base<'gc>(
     }
 
     if options.apply_transform {
-        let transform = this.base().transform(options.apply_matrix);
+        let mut transform = this.base().transform(options.apply_matrix);
+        if this.is_coop_hud() && !context.is_offscreen {
+            // Ruffle Together: a HUD clip stays put on screen whatever the co-op camera does
+            if let Some(undo) = context.stage.coop_camera().inverse() {
+                transform.matrix = undo * transform.matrix;
+            }
+        }
         context.transform_stack.push(&transform);
     }
 
@@ -2379,6 +2393,17 @@ pub trait TDisplayObject<'gc>:
     fn set_has_explicit_name(self, value: bool) {
         self.base().set_has_explicit_name(value);
     }
+
+    /// Ruffle Together: whether this clip is drawn without the co-op camera.
+    #[no_dynamic]
+    fn is_coop_hud(self) -> bool {
+        self.base().is_coop_hud()
+    }
+
+    #[no_dynamic]
+    fn set_coop_hud(self, value: bool) {
+        self.base().set_coop_hud(value);
+    }
     fn state(&self) -> Option<ButtonState> {
         None
     }
@@ -3103,6 +3128,9 @@ bitflags! {
         /// events before removing it. Removing it again with these methods in
         /// the meantime throws an error.
         const BEING_REMOVED_BY_AVM2   = 1 << 17;
+
+        /// Ruffle Together: a HUD clip, drawn without the co-op camera.
+        const COOP_HUD                = 1 << 18;
     }
 }
 
