@@ -142,9 +142,7 @@ pub struct CoopOpt {
 impl CoopOpt {
     /// The game named by --coop-keys.
     pub fn game(&self) -> anyhow::Result<keymap::Game> {
-        keymap::Game::from_name(&self.coop_keys).ok_or_else(|| {
-            anyhow::anyhow!("--coop-keys: no keys for \"{}\" (known: {})", self.coop_keys, keymap::Game::NAMES.join(", "))
-        })
+        keymap::Game::load(&self.coop_keys).map_err(|e| anyhow::anyhow!("--coop-keys: {e}"))
     }
 
     /// --coop-players, checked against the game's keys.

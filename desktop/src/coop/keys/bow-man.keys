@@ -1,0 +1,4 @@
+# Bow Man: player 1 W/S + Space, player 2 I/K + Enter (the game's own arrow keys are never pressed)
+slot 0: UP=87 DOWN=83 FIRE=32
+slot 1: UP=73 DOWN=75 FIRE=13
+local: UP=38,87 DOWN=40,83 FIRE=32,13,70

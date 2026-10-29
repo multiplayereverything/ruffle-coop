@@ -251,7 +251,7 @@ fn main() -> Result<(), Error> {
             settings: format!(
                 "{}; keys={}",
                 coop::session::settings_line(&player::LaunchOptions::from(&preferences)),
-                coop.game()?.name()
+                coop.game()?.id()
             ),
             lobby: lobby.clone(),
         };

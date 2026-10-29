@@ -1,0 +1,4 @@
+# Bad Ice-Cream: player 1 arrows + Space, player 2 W A S D + F
+slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=32
+slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=70
+local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=32,13,70

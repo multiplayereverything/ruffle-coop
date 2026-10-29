@@ -2,7 +2,7 @@
 //! players, a sync check every 25 frames, and what happens when someone leaves.
 
 use crate::coop::frame::Stepper;
-use crate::coop::keymap::{Game, local_buttons};
+use crate::coop::keymap::Game;
 use crate::coop::lockstep::{InputFrame, Lockstep};
 use crate::coop::net::{Event, Link, Role, connect};
 use crate::coop::protocol::Msg;
@@ -543,7 +543,7 @@ impl Session {
             link,
             lockstep: Lockstep::new(player_count, your_index, delay),
             stepper: Stepper::new(opts.game.keys(), player_count, your_index),
-            game: opts.game,
+            game: opts.game.clone(),
             local_index: your_index,
             peers,
             hosting,
@@ -618,7 +618,7 @@ impl Session {
             return script.input(self.local_sent as usize, self.local_index as usize);
         }
         InputFrame {
-            buttons: if self.focused { local_buttons(self.game, &self.held) } else { 0 },
+            buttons: if self.focused { self.game.local_buttons(&self.held) } else { 0 },
             // every PC's mouse travels as its slot's mouse; only the host's moves Ruffle's mouse
             mouse: self.mouse,
         }
@@ -925,7 +925,7 @@ mod tests {
             players: 2,
             delay: Some(3),
             swf: swf.to_path_buf(),
-            game: Game::BadIceCream,
+            game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
@@ -1163,7 +1163,7 @@ mod tests {
         let port = free_port();
         let three = |mut o: SessionOpts| {
             o.players = 3;
-            o.game = Game::GunMayhem2;
+            o.game = Game::built_in("gun-mayhem-2").expect("built in");
             o.script = Some(
                 Script::parse("move 100 50 0\nmove 200 60 1\nmove 300 70 2\nwait 30\nclick 310 71 2\nwait 30")
                     .expect("script"),
@@ -1242,7 +1242,7 @@ mod tests {
         let port = free_port();
         let four = |mut o: SessionOpts| {
             o.players = 4;
-            o.game = Game::GunMayhem2;
+            o.game = Game::built_in("gun-mayhem-2").expect("built in");
             o
         };
         let host_swf = swf.clone();

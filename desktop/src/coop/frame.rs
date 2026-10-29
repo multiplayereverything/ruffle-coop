@@ -100,6 +100,7 @@ impl Stepper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coop::keymap::Game;
     use crate::coop::lockstep::UP;
     use ruffle_core::PlayerBuilder;
     use ruffle_core::frame_clock::FrameClock;
@@ -113,7 +114,7 @@ mod tests {
         player.set_frame_clock(Some(clock.clone()));
         let frame = Duration::from_secs_f64(1.0 / player.frame_rate());
 
-        let mut stepper = Stepper::new(GameKeys::bad_ice_cream(), 2, 0);
+        let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
         let inputs = [InputFrame { buttons: UP, mouse: Some((200, 400, true)) }, InputFrame::default()];
         stepper.step(&mut player, &inputs);
         stepper.step(&mut player, &inputs);
@@ -130,7 +131,7 @@ mod tests {
             let player = PlayerBuilder::new().with_viewport_dimensions(width, height, 1.0).build();
             let mut player = player.lock().expect("player");
             player.set_mouse_in_stage(false); // this PC's own cursor is outside its window
-            let mut stepper = Stepper::new(GameKeys::bad_ice_cream(), 2, 0);
+            let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
             let inputs = [InputFrame { buttons: 0, mouse: Some((4001, 3999, false)) }];
             stepper.step(&mut player, &inputs);
             assert!(player.mouse_in_stage(), "the host's mouse is always in the stage");
@@ -152,7 +153,7 @@ mod tests {
             )
             .expect("player");
             let mut player = player.lock().expect("player");
-            let mut stepper = Stepper::new(GameKeys::bad_ice_cream(), 2, 0);
+            let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
             for _ in 0..5 {
                 stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
             }
@@ -176,7 +177,7 @@ mod tests {
         )
         .expect("player");
         let mut player = player.lock().expect("player");
-        let mut stepper = Stepper::new(GameKeys::bad_ice_cream(), 2, 0);
+        let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
         stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
         assert!(player.preload(&mut ruffle_core::limits::ExecutionLimit::exhausted()));
     }

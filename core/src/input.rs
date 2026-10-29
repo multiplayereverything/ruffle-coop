@@ -342,6 +342,15 @@ impl InputManager {
     }
 }
 
+/// Ruffle Together: the key code Flash sees for a key, by its physical key and by its logical key,
+/// so a key map written as key codes can be checked against Ruffle's own mapping.
+pub fn coop_key_codes(descriptor: KeyDescriptor) -> (Option<u32>, Option<u32>) {
+    (
+        map_to_key_code_physical(descriptor.physical_key).map(KeyCode::value),
+        map_to_key_code_logical(descriptor.logical_key, descriptor.key_location).map(KeyCode::value),
+    )
+}
+
 fn map_to_key_code_physical(key: PhysicalKey) -> Option<KeyCode> {
     Some(match key {
         PhysicalKey::Unknown => KeyCode::UNKNOWN,

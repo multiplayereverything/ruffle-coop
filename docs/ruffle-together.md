@@ -53,6 +53,28 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
   frame rate, time per frame, and how long the game waited for the other PC's keys.
 
+## For game builders: key maps
+
+`--coop-keys` takes a built-in map name or the path of a key map file (every player must use the same map; a
+different one is refused by name). Built in: bad-ice-cream, gun-mayhem-2, territory-war, bow-man, smileys-war,
+stealth-assassin, stealth-hunter-2, intrusion, intrusion-2, air-battle (the files are in `desktop/src/coop/keys/`).
+
+```
+# comment
+shared                                    every slot presses the same keys (a hot-seat game)
+slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
+slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
+local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=90,84 ALT=88,89
+```
+
+- `slot N:` (0-3, in order): what that player's buttons press in the game, as Flash key codes. The number of
+  slots is how many players the game can have.
+- `local:`: the keys a player presses on their own PC for each button (key codes; several per button).
+- Buttons: UP DOWN LEFT RIGHT FIRE ALT KEY1 KEY2 KEY3 KEY4 VIEW QUIT YES NO (the same names as in input scripts).
+- Key codes: letters 65-90, digits 48-57, numpad 0-9 96-105 and * + - . / 106/107/109/110/111 (sent with the
+  numpad location), Space 32, arrows 37-40, Enter 13, Shift 16, Ctrl 17, Alt 18, Esc 27, Backspace 8, Tab 9,
+  PageUp/Down 33/34, End/Home 35/36, Insert/Delete 45/46, ; = , - . / ` [ \ ] ' 186-192 and 219-222.
+
 ## For game builders: the co-op API (AS2 and AS3)
 
 A game made for Ruffle Together can ask about the players through `ExternalInterface`, the same way in AS2
@@ -96,8 +118,7 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 
 ## Known limits (v1)
 
-- Keys for Bad Ice-Cream and Gun Mayhem 2 only (Gun Mayhem 2 uses its default controls: changed controls in
-  the host's save would not match); P (pause), M (mute) and Esc don't reach the game in a session.
+- Only the keys in the game's key map reach the game (P, M, Esc and the like don't, unless a map names them).
 - If anyone leaves, the session ends for everyone.
 - During a session there is no menu, no fullscreen, and no opening another file; the stage keeps the game's
   own size (the window can still be resized).

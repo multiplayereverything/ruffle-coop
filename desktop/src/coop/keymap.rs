@@ -1,143 +1,238 @@
-//! Keys in and out. Every player uses their own normal keys (arrows or WASD, plus the game's
-//! buttons); the session presses them on everyone's copy as that player's keys in the game.
+//! Keys in and out. A key map says, for each player slot, which game keys the slot's buttons press
+//! (as Flash key codes), and which keys a player presses on their own PC for each button. Maps are
+//! small text files: built in for the games Ruffle Together ships with, or any file
+//! (`--coop-keys <file>`), so a game can bring its own keys without a new build.
+//!
+//! ```text
+//! # comment
+//! shared                                    every slot presses the same keys (a hot-seat game)
+//! slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
+//! slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
+//! local: UP=38,87 DOWN=40,83 FIRE=90,84     keys a player presses on their own PC, per button
+//! ```
 
-use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
+use crate::coop::lockstep::{MAX_PLAYERS, button_named};
 use ruffle_core::PlayerEvent;
 use ruffle_core::events::{KeyDescriptor, KeyLocation, LogicalKey, NamedKey, PhysicalKey};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
-/// Territory War's own keys, the same for every player (hot-seat).
-fn territory_war_button(key: &PhysicalKey) -> u16 {
-    match key {
-        PhysicalKey::ArrowUp => UP,
-        PhysicalKey::ArrowDown => DOWN,
-        PhysicalKey::ArrowLeft => LEFT,
-        PhysicalKey::ArrowRight => RIGHT,
-        PhysicalKey::Space => FIRE,
-        PhysicalKey::KeyX => ALT,
-        PhysicalKey::Digit1 => KEY1,
-        PhysicalKey::Digit2 => KEY2,
-        PhysicalKey::Digit3 => KEY3,
-        PhysicalKey::Digit4 => KEY4,
-        PhysicalKey::KeyV => VIEW,
-        PhysicalKey::KeyU => QUIT,
-        PhysicalKey::KeyY => YES,
-        PhysicalKey::KeyN => NO,
-        _ => 0,
-    }
-}
+/// The key maps built into this build.
+const BUILT_IN: &[(&str, &str)] = &[
+    ("bad-ice-cream", include_str!("keys/bad-ice-cream.keys")),
+    ("gun-mayhem-2", include_str!("keys/gun-mayhem-2.keys")),
+    ("territory-war", include_str!("keys/territory-war.keys")),
+    ("bow-man", include_str!("keys/bow-man.keys")),
+    ("smileys-war", include_str!("keys/smileys-war.keys")),
+    ("stealth-assassin", include_str!("keys/stealth-assassin.keys")),
+    ("stealth-hunter-2", include_str!("keys/stealth-hunter-2.keys")),
+    ("intrusion", include_str!("keys/intrusion.keys")),
+    ("intrusion-2", include_str!("keys/intrusion-2.keys")),
+    ("air-battle", include_str!("keys/air-battle.keys")),
+];
 
-/// The games a session knows the keys of (`--coop-keys`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Game {
-    BadIceCream,
-    GunMayhem2,
-    TerritoryWar,
+/// A game's key map (`--coop-keys`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Game {
+    name: String,
+    /// What every PC compares in the handshake: the name and a hash of the map's text.
+    id: String,
+    shared: bool,
+    /// Per slot: (button, key code), in the file's order.
+    slots: Vec<Vec<(u16, u32)>>,
+    /// (key code a player presses, button).
+    local: Vec<(u32, u16)>,
 }
 
 impl Game {
-    pub const NAMES: &[&str] = &["bad-ice-cream", "gun-mayhem-2", "territory-war"];
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "bad-ice-cream" => Some(Self::BadIceCream),
-            "gun-mayhem-2" => Some(Self::GunMayhem2),
-            "territory-war" => Some(Self::TerritoryWar),
-            _ => None,
-        }
+    pub fn built_in_names() -> Vec<&'static str> {
+        BUILT_IN.iter().map(|(name, _)| *name).collect()
     }
 
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::BadIceCream => "bad-ice-cream",
-            Self::GunMayhem2 => "gun-mayhem-2",
-            Self::TerritoryWar => "territory-war",
+    pub fn built_in(name: &str) -> Option<Self> {
+        let (name, text) = BUILT_IN.iter().find(|(n, _)| *n == name)?;
+        Some(Self::parse(name, text).expect("built-in key maps parse"))
+    }
+
+    /// A built-in name, or the path of a key map file.
+    pub fn load(spec: &str) -> Result<Self, String> {
+        if let Some(game) = Self::built_in(spec) {
+            return Ok(game);
         }
+        let path = std::path::Path::new(spec);
+        let text = std::fs::read_to_string(path).map_err(|_| {
+            format!("no keys for \"{spec}\": not a file, and not one of {}", Self::built_in_names().join(", "))
+        })?;
+        let name = path.file_stem().map_or(spec.into(), |s| s.to_string_lossy().into_owned());
+        Self::parse(&name, &text).map_err(|e| format!("{spec}: {e}"))
+    }
+
+    pub fn parse(name: &str, text: &str) -> Result<Self, String> {
+        let mut game = Game {
+            name: name.to_string(),
+            id: format!("{name}#{:.12x}", Sha256::digest(text.replace('\r', "").as_bytes())),
+            shared: false,
+            slots: vec![],
+            local: vec![],
+        };
+        for (number, line) in text.lines().enumerate() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            let fail = |why: String| format!("line {}: {why}", number + 1);
+            let pairs = |list: &str| -> Result<Vec<(u16, Vec<u32>)>, String> {
+                list.split_whitespace()
+                    .map(|pair| {
+                        let (button, codes) = pair.split_once('=').ok_or_else(|| fail(format!("expected BUTTON=code: {pair}")))?;
+                        let button = button_named(button).ok_or_else(|| fail(format!("unknown button {button}")))?;
+                        let codes = codes
+                            .split(',')
+                            .map(|c| {
+                                c.parse::<u32>()
+                                    .ok()
+                                    .filter(|&c| key_descriptor(c).is_some())
+                                    .ok_or_else(|| fail(format!("no key with code {c}")))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Ok((button, codes))
+                    })
+                    .collect()
+            };
+            if line.is_empty() {
+                continue;
+            } else if line == "shared" {
+                game.shared = true;
+            } else if let Some(list) = line.strip_prefix("local:") {
+                for (button, codes) in pairs(list)? {
+                    game.local.extend(codes.into_iter().map(|code| (code, button)));
+                }
+            } else if let Some(rest) = line.strip_prefix("slot ") {
+                let (slot, list) = rest.split_once(':').ok_or_else(|| fail("expected slot N: ...".into()))?;
+                if slot.trim().parse::<usize>().ok() != Some(game.slots.len()) || game.slots.len() >= MAX_PLAYERS {
+                    return Err(fail(format!("slots go 0, 1, 2, 3 in order (got {slot})")));
+                }
+                let keys = pairs(list)?
+                    .into_iter()
+                    .map(|(button, codes)| match codes[..] {
+                        [code] => Ok((button, code)),
+                        _ => Err(fail("a slot button presses one key".into())),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                game.slots.push(keys);
+            } else {
+                return Err(fail(format!("unknown line: {line}")));
+            }
+        }
+        if game.slots.is_empty() {
+            return Err("no slots".into());
+        }
+        Ok(game)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The name and a hash of the map: every player must have the same.
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// How many players the game has keys for.
-    pub fn max_players(self) -> u8 {
-        self.keys().slots.len() as u8
+    pub fn max_players(&self) -> u8 {
+        self.slots.len() as u8
     }
 
     /// The keys each player slot presses in the game.
-    pub fn keys(self) -> GameKeys {
-        match self {
-            Self::BadIceCream => GameKeys::bad_ice_cream(),
-            Self::GunMayhem2 => GameKeys::gun_mayhem_2(),
-            Self::TerritoryWar => GameKeys::territory_war(),
+    pub fn keys(&self) -> GameKeys {
+        let slots: Vec<Vec<GameKey>> = self
+            .slots
+            .iter()
+            .map(|slot| {
+                slot.iter()
+                    .map(|&(button, code)| GameKey { button, key: key_descriptor(code).expect("checked when parsed") })
+                    .collect()
+            })
+            .collect();
+        GameKeys {
+            held: vec![0; slots.len()],
+            slots,
+            shared: self.shared,
         }
+    }
+
+    /// This PC's buttons from the keys held right now.
+    pub fn local_buttons(&self, held: &HashSet<PhysicalKey>) -> u16 {
+        let mut buttons = 0;
+        for &key in held {
+            let pressed = KeyDescriptor { physical_key: key, logical_key: LogicalKey::Unknown, key_location: KeyLocation::Standard };
+            if let (Some(code), _) = ruffle_core::coop_key_codes(pressed) {
+                buttons |= self.local.iter().filter(|(c, _)| *c == code).fold(0, |all, (_, b)| all | b);
+            }
+        }
+        buttons
     }
 }
 
-/// This PC's buttons from the keys held right now.
-pub fn local_buttons(game: Game, held: &HashSet<PhysicalKey>) -> u16 {
-    if game == Game::TerritoryWar {
-        return held.iter().map(territory_war_button).fold(0, |all, button| all | button);
-    }
-    let mut buttons = 0;
-    for key in held {
-        buttons |= match key {
-            PhysicalKey::ArrowUp | PhysicalKey::KeyW => UP,
-            PhysicalKey::ArrowDown | PhysicalKey::KeyS => DOWN,
-            PhysicalKey::ArrowLeft | PhysicalKey::KeyA => LEFT,
-            PhysicalKey::ArrowRight | PhysicalKey::KeyD => RIGHT,
-            _ => match game {
-                Game::BadIceCream => match key {
-                    PhysicalKey::Space | PhysicalKey::Enter | PhysicalKey::KeyF => FIRE,
-                    _ => 0,
-                },
-                // either player's set: Z / T shoot, X / Y grenade
-                Game::GunMayhem2 => match key {
-                    PhysicalKey::KeyZ | PhysicalKey::KeyT => FIRE,
-                    PhysicalKey::KeyX | PhysicalKey::KeyY => ALT,
-                    _ => 0,
-                },
-                // handled above
-                Game::TerritoryWar => 0,
-            },
-        };
-    }
-    buttons
+/// The key a game sees for a Flash key code: the physical key and the logical key both map to it.
+fn key_descriptor(code: u32) -> Option<KeyDescriptor> {
+    use PhysicalKey as P;
+    const LETTERS: [PhysicalKey; 26] = [
+        P::KeyA, P::KeyB, P::KeyC, P::KeyD, P::KeyE, P::KeyF, P::KeyG, P::KeyH, P::KeyI, P::KeyJ, P::KeyK, P::KeyL, P::KeyM,
+        P::KeyN, P::KeyO, P::KeyP, P::KeyQ, P::KeyR, P::KeyS, P::KeyT, P::KeyU, P::KeyV, P::KeyW, P::KeyX, P::KeyY, P::KeyZ,
+    ];
+    const DIGITS: [PhysicalKey; 10] =
+        [P::Digit0, P::Digit1, P::Digit2, P::Digit3, P::Digit4, P::Digit5, P::Digit6, P::Digit7, P::Digit8, P::Digit9];
+    const NUMPAD: [PhysicalKey; 10] =
+        [P::Numpad0, P::Numpad1, P::Numpad2, P::Numpad3, P::Numpad4, P::Numpad5, P::Numpad6, P::Numpad7, P::Numpad8, P::Numpad9];
+    let character = |physical_key, ch| KeyDescriptor { physical_key, logical_key: LogicalKey::Character(ch), key_location: KeyLocation::Standard };
+    let numpad = |physical_key, ch| KeyDescriptor { physical_key, logical_key: LogicalKey::Character(ch), key_location: KeyLocation::Numpad };
+    let named = |physical_key, named| KeyDescriptor { physical_key, logical_key: LogicalKey::Named(named), key_location: KeyLocation::Standard };
+    let digit = |n: u32| char::from_digit(n, 10).unwrap_or('0');
+    Some(match code {
+        65..=90 => character(LETTERS[(code - 65) as usize], (b'a' + (code - 65) as u8) as char),
+        48..=57 => character(DIGITS[(code - 48) as usize], digit(code - 48)),
+        96..=105 => numpad(NUMPAD[(code - 96) as usize], digit(code - 96)),
+        106 => numpad(P::NumpadMultiply, '*'),
+        107 => numpad(P::NumpadAdd, '+'),
+        109 => numpad(P::NumpadSubtract, '-'),
+        110 => numpad(P::NumpadDecimal, '.'),
+        111 => numpad(P::NumpadDivide, '/'),
+        32 => character(P::Space, ' '),
+        37 => named(P::ArrowLeft, NamedKey::ArrowLeft),
+        38 => named(P::ArrowUp, NamedKey::ArrowUp),
+        39 => named(P::ArrowRight, NamedKey::ArrowRight),
+        40 => named(P::ArrowDown, NamedKey::ArrowDown),
+        8 => named(P::Backspace, NamedKey::Backspace),
+        9 => named(P::Tab, NamedKey::Tab),
+        13 => named(P::Enter, NamedKey::Enter),
+        16 => named(P::ShiftLeft, NamedKey::Shift),
+        17 => named(P::ControlLeft, NamedKey::Control),
+        18 => named(P::AltLeft, NamedKey::Alt),
+        27 => named(P::Escape, NamedKey::Escape),
+        33 => named(P::PageUp, NamedKey::PageUp),
+        34 => named(P::PageDown, NamedKey::PageDown),
+        35 => named(P::End, NamedKey::End),
+        36 => named(P::Home, NamedKey::Home),
+        45 => named(P::Insert, NamedKey::Insert),
+        46 => named(P::Delete, NamedKey::Delete),
+        186 => character(P::Semicolon, ';'),
+        187 => character(P::Equal, '='),
+        188 => character(P::Comma, ','),
+        189 => character(P::Minus, '-'),
+        190 => character(P::Period, '.'),
+        191 => character(P::Slash, '/'),
+        192 => character(P::Backquote, '`'),
+        219 => character(P::BracketLeft, '['),
+        220 => character(P::Backslash, '\\'),
+        221 => character(P::BracketRight, ']'),
+        222 => character(P::Quote, '\''),
+        _ => return None,
+    })
 }
 
 #[derive(Clone, Copy)]
 struct GameKey {
     button: u16,
     key: KeyDescriptor,
-}
-
-fn named(button: u16, physical: PhysicalKey, named: NamedKey) -> GameKey {
-    GameKey {
-        button,
-        key: KeyDescriptor {
-            physical_key: physical,
-            logical_key: LogicalKey::Named(named),
-            key_location: KeyLocation::Standard,
-        },
-    }
-}
-
-fn numpad(button: u16, physical: PhysicalKey, ch: char) -> GameKey {
-    GameKey {
-        button,
-        key: KeyDescriptor {
-            physical_key: physical,
-            logical_key: LogicalKey::Character(ch),
-            key_location: KeyLocation::Numpad,
-        },
-    }
-}
-
-fn character(button: u16, physical: PhysicalKey, ch: char) -> GameKey {
-    GameKey {
-        button,
-        key: KeyDescriptor {
-            physical_key: physical,
-            logical_key: LogicalKey::Character(ch),
-            key_location: KeyLocation::Standard,
-        },
-    }
 }
 
 /// The game's own keys for each player slot, and what each slot holds now.
@@ -149,98 +244,6 @@ pub struct GameKeys {
 }
 
 impl GameKeys {
-    /// Bad Ice-Cream: player 1 = arrows + Space, player 2 = W A S D + F.
-    pub fn bad_ice_cream() -> Self {
-        let p1 = vec![
-            named(UP, PhysicalKey::ArrowUp, NamedKey::ArrowUp),
-            named(DOWN, PhysicalKey::ArrowDown, NamedKey::ArrowDown),
-            named(LEFT, PhysicalKey::ArrowLeft, NamedKey::ArrowLeft),
-            named(RIGHT, PhysicalKey::ArrowRight, NamedKey::ArrowRight),
-            character(FIRE, PhysicalKey::Space, ' '),
-        ];
-        let p2 = vec![
-            character(UP, PhysicalKey::KeyW, 'w'),
-            character(DOWN, PhysicalKey::KeyS, 's'),
-            character(LEFT, PhysicalKey::KeyA, 'a'),
-            character(RIGHT, PhysicalKey::KeyD, 'd'),
-            character(FIRE, PhysicalKey::KeyF, 'f'),
-        ];
-        Self {
-            held: vec![0; 2],
-            slots: vec![p1, p2],
-            shared: false,
-        }
-    }
-
-    /// Territory War (hot-seat): arrows, Space (jump, power, shoot), X (cancel the weapon), 1-4
-    /// (turn menu), V (map view), U (quit) then Y / N; every player presses the same keys.
-    pub fn territory_war() -> Self {
-        let keys = vec![
-            named(UP, PhysicalKey::ArrowUp, NamedKey::ArrowUp),
-            named(DOWN, PhysicalKey::ArrowDown, NamedKey::ArrowDown),
-            named(LEFT, PhysicalKey::ArrowLeft, NamedKey::ArrowLeft),
-            named(RIGHT, PhysicalKey::ArrowRight, NamedKey::ArrowRight),
-            character(FIRE, PhysicalKey::Space, ' '),
-            character(ALT, PhysicalKey::KeyX, 'x'),
-            character(KEY1, PhysicalKey::Digit1, '1'),
-            character(KEY2, PhysicalKey::Digit2, '2'),
-            character(KEY3, PhysicalKey::Digit3, '3'),
-            character(KEY4, PhysicalKey::Digit4, '4'),
-            character(VIEW, PhysicalKey::KeyV, 'v'),
-            character(QUIT, PhysicalKey::KeyU, 'u'),
-            character(YES, PhysicalKey::KeyY, 'y'),
-            character(NO, PhysicalKey::KeyN, 'n'),
-        ];
-        Self {
-            held: vec![0; 4],
-            slots: vec![keys; 4],
-            shared: true,
-        }
-    }
-
-    /// Gun Mayhem 2's defaults: player 1 = arrows + Z shoot + X grenade, player 2 = W A S D +
-    /// T shoot + Y grenade, player 3 = numpad / 7 8 9 + * shoot + - grenade, player 4 = numpad
-    /// 5 1 2 3 + 0 shoot + . grenade.
-    pub fn gun_mayhem_2() -> Self {
-        let p1 = vec![
-            named(UP, PhysicalKey::ArrowUp, NamedKey::ArrowUp),
-            named(DOWN, PhysicalKey::ArrowDown, NamedKey::ArrowDown),
-            named(LEFT, PhysicalKey::ArrowLeft, NamedKey::ArrowLeft),
-            named(RIGHT, PhysicalKey::ArrowRight, NamedKey::ArrowRight),
-            character(FIRE, PhysicalKey::KeyZ, 'z'),
-            character(ALT, PhysicalKey::KeyX, 'x'),
-        ];
-        let p2 = vec![
-            character(UP, PhysicalKey::KeyW, 'w'),
-            character(DOWN, PhysicalKey::KeyS, 's'),
-            character(LEFT, PhysicalKey::KeyA, 'a'),
-            character(RIGHT, PhysicalKey::KeyD, 'd'),
-            character(FIRE, PhysicalKey::KeyT, 't'),
-            character(ALT, PhysicalKey::KeyY, 'y'),
-        ];
-        let p3 = vec![
-            numpad(UP, PhysicalKey::NumpadDivide, '/'),
-            numpad(LEFT, PhysicalKey::Numpad7, '7'),
-            numpad(DOWN, PhysicalKey::Numpad8, '8'),
-            numpad(RIGHT, PhysicalKey::Numpad9, '9'),
-            numpad(FIRE, PhysicalKey::NumpadMultiply, '*'),
-            numpad(ALT, PhysicalKey::NumpadSubtract, '-'),
-        ];
-        let p4 = vec![
-            numpad(UP, PhysicalKey::Numpad5, '5'),
-            numpad(LEFT, PhysicalKey::Numpad1, '1'),
-            numpad(DOWN, PhysicalKey::Numpad2, '2'),
-            numpad(RIGHT, PhysicalKey::Numpad3, '3'),
-            numpad(FIRE, PhysicalKey::Numpad0, '0'),
-            numpad(ALT, PhysicalKey::NumpadDecimal, '.'),
-        ];
-        Self {
-            held: vec![0; 4],
-            slots: vec![p1, p2, p3, p4],
-            shared: false,
-        }
-    }
-
     /// Key presses and releases that turn `slot`'s held buttons into `buttons`.
     pub fn events(&mut self, slot: u8, buttons: u16) -> Vec<PlayerEvent> {
         let Some(keys) = self.slots.get(slot as usize) else {
@@ -278,6 +281,11 @@ impl GameKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
+
+    fn game(name: &str) -> Game {
+        Game::built_in(name).expect("built in")
+    }
 
     fn held(keys: &[PhysicalKey]) -> HashSet<PhysicalKey> {
         keys.iter().copied().collect()
@@ -303,29 +311,70 @@ mod tests {
             .collect()
     }
 
+    /// Every key code a map can name reaches the game as that code, by Ruffle's physical mapping
+    /// and by its logical one (the default), and every built-in map parses.
+    #[test]
+    fn key_codes_round_trip_and_built_in_maps_parse() {
+        let mut known = 0;
+        for code in 0..=255 {
+            if let Some(key) = key_descriptor(code) {
+                assert_eq!(ruffle_core::coop_key_codes(key), (Some(code), Some(code)), "code {code}");
+                known += 1;
+            }
+        }
+        assert_eq!(known, 80, "letters, digits, numpad, arrows, named keys and punctuation");
+        for name in Game::built_in_names() {
+            assert!(Game::built_in(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn bad_key_map_files_say_what_is_wrong() {
+        let err = |text: &str| Game::parse("t", text).err().expect("an error");
+        assert!(err("slot 0: UP=38 JUMP=32").contains("unknown button JUMP"));
+        assert!(err("slot 0: UP=999").contains("no key with code 999"));
+        assert!(err("slot 1: UP=38").contains("slots go 0, 1, 2, 3"));
+        assert!(err("slot 0: UP=38,87").contains("one key"));
+        assert!(err("players 2\nslot 0: UP=38").contains("line 1: unknown line"));
+        assert_eq!(err("# nothing"), "no slots");
+        let a = Game::parse("t", "slot 0: UP=38").expect("parses");
+        let b = Game::parse("t", "slot 0: UP=40").expect("parses");
+        assert_ne!(a.id(), b.id(), "a different map is refused in the handshake");
+    }
+
+    #[test]
+    fn a_key_map_file_can_be_loaded() {
+        let dir = std::env::temp_dir().join(format!("coop-keys-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("my-game.keys");
+        std::fs::write(&path, "slot 0: FIRE=32\r\nslot 1: FIRE=13\r\nlocal: FIRE=32\r\n").expect("write");
+        let game = Game::load(&path.to_string_lossy()).expect("loads");
+        assert_eq!((game.name(), game.max_players()), ("my-game", 2));
+        assert_eq!(game.local_buttons(&held(&[PhysicalKey::Space])), FIRE);
+        assert!(Game::load("pong").err().expect("an error").contains("gun-mayhem-2"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn wasd_and_arrows_both_move() {
-        let bic = Game::BadIceCream;
-        assert_eq!(local_buttons(bic, &held(&[PhysicalKey::KeyW])), UP);
-        assert_eq!(local_buttons(bic, &held(&[PhysicalKey::ArrowUp])), UP);
-        assert_eq!(
-            local_buttons(bic, &held(&[PhysicalKey::KeyA, PhysicalKey::ArrowDown])),
-            LEFT | DOWN
-        );
-        assert_eq!(local_buttons(bic, &held(&[PhysicalKey::KeyD])), RIGHT);
+        let bic = game("bad-ice-cream");
+        assert_eq!(bic.local_buttons(&held(&[PhysicalKey::KeyW])), UP);
+        assert_eq!(bic.local_buttons(&held(&[PhysicalKey::ArrowUp])), UP);
+        assert_eq!(bic.local_buttons(&held(&[PhysicalKey::KeyA, PhysicalKey::ArrowDown])), LEFT | DOWN);
+        assert_eq!(bic.local_buttons(&held(&[PhysicalKey::KeyD])), RIGHT);
         for fire in [PhysicalKey::Space, PhysicalKey::Enter, PhysicalKey::KeyF] {
-            assert_eq!(local_buttons(bic, &held(&[fire])), FIRE);
+            assert_eq!(bic.local_buttons(&held(&[fire])), FIRE);
         }
-        assert_eq!(local_buttons(bic, &held(&[PhysicalKey::KeyQ])), 0);
+        assert_eq!(bic.local_buttons(&held(&[PhysicalKey::KeyQ])), 0);
     }
 
     /// Gun Mayhem 2's own defaults (savedata2.controlarray): player 1 arrows + Z shoot + X
     /// grenade, player 2 W A S D + T shoot + Y grenade; a player may use either set on their PC.
     #[test]
     fn gun_mayhem_2_keys() {
-        let gm2 = Game::GunMayhem2;
-        assert_eq!(local_buttons(gm2, &held(&[PhysicalKey::ArrowLeft])), LEFT);
-        assert_eq!(local_buttons(gm2, &held(&[PhysicalKey::KeyW])), UP);
+        let gm2 = game("gun-mayhem-2");
+        assert_eq!(gm2.local_buttons(&held(&[PhysicalKey::ArrowLeft])), LEFT);
+        assert_eq!(gm2.local_buttons(&held(&[PhysicalKey::KeyW])), UP);
         for (key, button) in [
             (PhysicalKey::KeyZ, FIRE),
             (PhysicalKey::KeyT, FIRE),
@@ -333,7 +382,7 @@ mod tests {
             (PhysicalKey::KeyY, ALT),
             (PhysicalKey::Space, 0),
         ] {
-            assert_eq!(local_buttons(gm2, &held(&[key])), button, "{key:?}");
+            assert_eq!(gm2.local_buttons(&held(&[key])), button, "{key:?}");
         }
         let mut keys = gm2.keys();
         let mut down = down_keys(&keys.events(0, UP | FIRE | ALT));
@@ -355,7 +404,7 @@ mod tests {
     /// 101/97/98/99 + 96/110); the game sees numpad key codes only with the numpad location.
     #[test]
     fn gun_mayhem_2_players_3_and_4_use_the_numpad() {
-        let mut keys = Game::GunMayhem2.keys();
+        let mut keys = game("gun-mayhem-2").keys();
         let pressed = |events: Vec<PlayerEvent>| -> Vec<(LogicalKey, KeyLocation)> {
             events
                 .into_iter()
@@ -374,15 +423,15 @@ mod tests {
         for key in [numpad('2'), numpad('3'), numpad('0'), numpad('.')] {
             assert!(p4.contains(&key), "player 4 {key:?}");
         }
-        assert_eq!(Game::GunMayhem2.max_players(), 4);
-        assert_eq!(Game::BadIceCream.max_players(), 2);
+        assert_eq!(game("gun-mayhem-2").max_players(), 4);
+        assert_eq!(game("bad-ice-cream").max_players(), 2);
     }
 
     /// Territory War is hot-seat: every player presses the same keys, so a key is down while any
     /// player holds it and released only when nobody does.
     #[test]
     fn territory_war_keys_are_shared_by_every_player() {
-        let mut keys = Game::TerritoryWar.keys();
+        let mut keys = game("territory-war").keys();
         assert_eq!(down_keys(&keys.events(0, LEFT)), vec![PhysicalKey::ArrowLeft]);
         assert!(keys.events(1, LEFT).is_empty(), "already down");
         assert!(keys.events(0, 0).is_empty(), "player 2 still holds it");
@@ -396,12 +445,12 @@ mod tests {
         // the top-row digit, not the numpad one: the game reads key code 49
         assert!(events.iter().any(|e| matches!(e, PlayerEvent::KeyDown { key }
             if key.logical_key == LogicalKey::Character('1') && key.key_location == KeyLocation::Standard)));
-        assert_eq!(Game::TerritoryWar.max_players(), 4);
+        assert_eq!(game("territory-war").max_players(), 4);
     }
 
     #[test]
     fn territory_war_local_keys() {
-        let tw = Game::TerritoryWar;
+        let tw = game("territory-war");
         for (key, button) in [
             (PhysicalKey::ArrowUp, UP),
             (PhysicalKey::Space, FIRE),
@@ -414,22 +463,48 @@ mod tests {
             (PhysicalKey::KeyN, NO),
             (PhysicalKey::KeyW, 0),
         ] {
-            assert_eq!(local_buttons(tw, &held(&[key])), button, "{key:?}");
+            assert_eq!(tw.local_buttons(&held(&[key])), button, "{key:?}");
+        }
+    }
+
+    /// Bow Man: player 1 W/S + Space, player 2 I/K + Enter. The game's own arrow keys zoom, quit
+    /// and clear the screen, so the map never presses an arrow.
+    #[test]
+    fn bow_man_keys_never_press_an_arrow() {
+        let bm = game("bow-man");
+        let mut keys = bm.keys();
+        let mut down = down_keys(&keys.events(0, UP | DOWN | FIRE | LEFT | RIGHT | ALT));
+        down.sort_by_key(|k| *k as u32);
+        let mut expected = vec![PhysicalKey::KeyW, PhysicalKey::KeyS, PhysicalKey::Space];
+        expected.sort_by_key(|k| *k as u32);
+        assert_eq!(down, expected);
+        let events = keys.events(1, UP | FIRE | LEFT);
+        let mut down = down_keys(&events);
+        down.sort_by_key(|k| *k as u32);
+        let mut expected = vec![PhysicalKey::KeyI, PhysicalKey::Enter];
+        expected.sort_by_key(|k| *k as u32);
+        assert_eq!(down, expected);
+        assert!(events.iter().any(|e| matches!(e,
+            PlayerEvent::KeyDown { key } if key.logical_key == LogicalKey::Named(NamedKey::Enter))));
+        assert_eq!(bm.max_players(), 2);
+        assert_eq!(bm.local_buttons(&held(&[PhysicalKey::ArrowUp])), UP);
+        assert_eq!(bm.local_buttons(&held(&[PhysicalKey::KeyS])), DOWN);
+        for fire in [PhysicalKey::Space, PhysicalKey::Enter, PhysicalKey::KeyF] {
+            assert_eq!(bm.local_buttons(&held(&[fire])), FIRE);
         }
     }
 
     #[test]
     fn games_by_name() {
-        assert_eq!(Game::from_name("territory-war"), Some(Game::TerritoryWar));
-        assert_eq!(Game::from_name("bad-ice-cream"), Some(Game::BadIceCream));
-        assert_eq!(Game::from_name("gun-mayhem-2"), Some(Game::GunMayhem2));
-        assert_eq!(Game::from_name("pong"), None);
-        assert_eq!(Game::GunMayhem2.name(), "gun-mayhem-2");
+        for name in ["territory-war", "bad-ice-cream", "gun-mayhem-2", "bow-man", "stealth-hunter-2"] {
+            assert_eq!(game(name).name(), name);
+        }
+        assert!(Game::built_in("pong").is_none());
     }
 
     #[test]
     fn slot1_maps_to_wasd() {
-        let mut keys = GameKeys::bad_ice_cream();
+        let mut keys = game("bad-ice-cream").keys();
         let events = keys.events(1, UP | FIRE);
         let mut down = down_keys(&events);
         down.sort_by_key(|k| *k as u32);
@@ -443,7 +518,7 @@ mod tests {
 
     #[test]
     fn slot0_maps_to_arrows_and_space() {
-        let mut keys = GameKeys::bad_ice_cream();
+        let mut keys = game("bad-ice-cream").keys();
         let events = keys.events(0, LEFT | FIRE);
         assert!(events.iter().any(|e| matches!(e,
             PlayerEvent::KeyDown { key } if key.logical_key == LogicalKey::Named(NamedKey::ArrowLeft))));
@@ -452,7 +527,7 @@ mod tests {
 
     #[test]
     fn only_changes_emitted() {
-        let mut keys = GameKeys::bad_ice_cream();
+        let mut keys = game("bad-ice-cream").keys();
         assert_eq!(keys.events(0, UP).len(), 1);
         assert!(keys.events(0, UP).is_empty());
         let events = keys.events(0, UP | RIGHT);
@@ -462,7 +537,7 @@ mod tests {
 
     #[test]
     fn release_on_zero() {
-        let mut keys = GameKeys::bad_ice_cream();
+        let mut keys = game("bad-ice-cream").keys();
         keys.events(1, DOWN | FIRE);
         let events = keys.events(1, 0);
         assert_eq!(up_keys(&events).len(), 2);
@@ -471,7 +546,7 @@ mod tests {
 
     #[test]
     fn release_all_lets_go_of_every_slot() {
-        let mut keys = GameKeys::bad_ice_cream();
+        let mut keys = game("bad-ice-cream").keys();
         keys.events(0, UP);
         keys.events(1, LEFT | FIRE);
         let events = keys.release_all();

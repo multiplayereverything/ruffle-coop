@@ -1,0 +1,7 @@
+# Smileys War: UP jump, LEFT/RIGHT move, DOWN next weapon, FIRE shoot, KEY1 aim up, KEY2 aim down
+# (player 1 shoots and aims with the mouse; E holds the scoreboard and Esc quits: never pressed)
+slot 0: UP=87 LEFT=65 RIGHT=68 DOWN=83
+slot 1: UP=38 LEFT=37 RIGHT=39 DOWN=40 FIRE=13 KEY1=33 KEY2=34
+slot 2: UP=73 LEFT=74 RIGHT=76 DOWN=75 FIRE=72 KEY1=85 KEY2=79
+slot 3: UP=104 LEFT=100 RIGHT=102 DOWN=101 FIRE=96 KEY1=103 KEY2=105
+local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=32,13,70 KEY1=81,33 KEY2=69,34

@@ -179,7 +179,7 @@ mod tests {
             Replay {
                 swf: Path::new(&swf),
                 script: &script,
-                game: Game::BadIceCream,
+                game: Game::built_in("bad-ice-cream").expect("built in"),
                 frames: 1000,
                 jitter_ms,
                 frame_clock: true,

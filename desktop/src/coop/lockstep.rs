@@ -18,6 +18,28 @@ pub const QUIT: u16 = 2048;
 pub const YES: u16 = 4096;
 pub const NO: u16 = 8192;
 
+/// A button by its name in input scripts and key maps (UP, FIRE, KEY1, ...; "0" is none).
+pub fn button_named(name: &str) -> Option<u16> {
+    Some(match name {
+        "0" => 0,
+        "UP" => UP,
+        "DOWN" => DOWN,
+        "LEFT" => LEFT,
+        "RIGHT" => RIGHT,
+        "FIRE" => FIRE,
+        "ALT" => ALT,
+        "KEY1" => KEY1,
+        "KEY2" => KEY2,
+        "KEY3" => KEY3,
+        "KEY4" => KEY4,
+        "VIEW" => VIEW,
+        "QUIT" => QUIT,
+        "YES" => YES,
+        "NO" => NO,
+        _ => return None,
+    })
+}
+
 /// Up to 4 players (v1 plays 2).
 pub const MAX_PLAYERS: usize = 4;
 

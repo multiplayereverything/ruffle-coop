@@ -210,3 +210,12 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   fingerprint covers every object's position/visibility/depth/frame, so per-PC moves/visibility/objects show OUT
   OF SYNC; per-PC camera not supported. Built while another session's processes held target/release
   ruffle_desktop.exe: checks used target/release/deps/ruffle_desktop.exe. Not released.
+- Key map FILES (7 key-map requests at once: bow-man, stealth-hunter-2, smileys-war, stealth-assassin, intrusion,
+  air-battle and intrusion-2 aliases): keymap.rs now parses small text maps (slot N: BUTTON=keycode..., local:,
+  shared); the three old maps became built-in files (desktop/src/coop/keys/*.keys) and all 10 are built in;
+  --coop-keys takes a name or a file path; the handshake compares name#sha256(text). Core: pub coop_key_codes
+  (physical + logical key code of a key) to check the table and map local keys. Tests: every one of the 80 codes
+  round-trips through Ruffle's physical AND logical mapping; bad files name the line; a file loads; every
+  existing key test kept. 107/107. Replays identical to before for BIC (fa623659), GM2 4p (8e30f66c) and TW
+  (8f0d87b8); GM2 from a .keys file = built in. Test build: test-build/ruffle_desktop.exe + *.keys (target/release
+  exe locked by another session's processes). Not released.

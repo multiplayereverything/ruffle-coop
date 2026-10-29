@@ -10,9 +10,7 @@
 //! move 100 50 2   player 2's mouse (any of click/move; the host's when left out)
 //! ```
 
-use crate::coop::lockstep::{
-    ALT, DOWN, FIRE, InputFrame, KEY1, KEY2, KEY3, KEY4, LEFT, MAX_PLAYERS, NO, QUIT, RIGHT, UP, VIEW, YES,
-};
+use crate::coop::lockstep::{InputFrame, MAX_PLAYERS, button_named};
 
 pub struct Script {
     frames: Vec<[InputFrame; MAX_PLAYERS]>,
@@ -61,24 +59,7 @@ impl Script {
                         .ok_or_else(|| fail("unknown player"))?;
                     let mut buttons = 0;
                     for name in words.get(1).ok_or_else(|| fail("expected buttons"))?.split('|') {
-                        buttons |= match name {
-                            "0" => 0,
-                            "UP" => UP,
-                            "DOWN" => DOWN,
-                            "LEFT" => LEFT,
-                            "RIGHT" => RIGHT,
-                            "FIRE" => FIRE,
-                            "ALT" => ALT,
-                            "KEY1" => KEY1,
-                            "KEY2" => KEY2,
-                            "KEY3" => KEY3,
-                            "KEY4" => KEY4,
-                            "VIEW" => VIEW,
-                            "QUIT" => QUIT,
-                            "YES" => YES,
-                            "NO" => NO,
-                            _ => return Err(fail("unknown button")),
-                        };
+                        buttons |= button_named(name).ok_or_else(|| fail("unknown button"))?;
                     }
                     now[player].buttons = buttons;
                 }
@@ -106,6 +87,7 @@ impl Script {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coop::lockstep::{FIRE, KEY1, LEFT, NO, UP, VIEW};
 
     #[test]
     fn wait_repeats_current_buttons() {
