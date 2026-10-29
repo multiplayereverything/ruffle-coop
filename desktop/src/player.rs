@@ -348,6 +348,7 @@ impl ActivePlayer {
             builder = std::mem::take(&mut builder)
                 .with_locale(ruffle_core::frame_clock::FrameClockLocale::new(session.clock()))
                 .with_storage(Box::new(session.take_storage()))
+                .with_max_execution_duration(crate::coop::replay::SESSION_SCRIPT_TIMEOUT)
                 // the window size must not reach the game: only NO_SCALE makes the stage size
                 // follow the window and fires resize events, so a session forces SHOW_ALL
                 .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)

@@ -14,6 +14,10 @@ use ruffle_core::backend::navigator::NullNavigatorBackend;
 use ruffle_core::frame_clock::{FrameClock, FrameClockLocale};
 use ruffle_core::tag_utils::movie_from_path;
 use ruffle_core::{Player, PlayerBuilder};
+
+/// How long one frame's scripts may run before Ruffle stops them. Ruffle's 15 s is real time, so
+/// a busy PC would stop a long script that the others finish; in a session nothing is stopped.
+pub const SESSION_SCRIPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(u64::MAX);
 use ruffle_render_wgpu::backend::{WgpuRenderBackend, create_wgpu_instance, request_adapter_and_device};
 use ruffle_render_wgpu::descriptors::Descriptors;
 use ruffle_render_wgpu::target::TextureTarget;
@@ -97,7 +101,8 @@ pub fn headless_player(
         // always a real renderer, as in a session: games draw clips into bitmaps and change
         // what is on stage when that works (Bad Ice-Cream's title screen does), so a renderer
         // that can't draw takes a different path
-        .with_renderer(offscreen_renderer(width, height)?);
+        .with_renderer(offscreen_renderer(width, height)?)
+        .with_max_execution_duration(SESSION_SCRIPT_TIMEOUT);
     builder = match &clock {
         Some(clock) => builder.with_locale(FrameClockLocale::new(clock.clone())),
         None => builder.with_locale(DefaultLocaleBackend::new()),
@@ -197,5 +202,19 @@ mod tests {
         // control: another start date seeds Math.random differently, and the fingerprint sees it
         let other_seed = run(0, 1_700_000_000_001);
         assert_ne!(steady, other_seed, "the fingerprint missed a different game");
+    }
+
+    /// Intrusion 2 with 4 players on a busy PC: Ruffle's 15 s script limit stopped the menu's
+    /// long first script on some PCs only (OUT OF SYNC at frame 24). A session never stops one.
+    #[test]
+    fn a_session_player_never_stops_a_long_script() {
+        let Ok(swf) = std::env::var("COOP_TEST_SWF") else {
+            eprintln!("skipping: COOP_TEST_SWF not set");
+            return;
+        };
+        let player = headless_player(Path::new(&swf), None, SessionStorage::default()).expect("player");
+        let player = player.lock().expect("lock");
+        assert_eq!(player.max_execution_duration(), SESSION_SCRIPT_TIMEOUT);
+        assert!(SESSION_SCRIPT_TIMEOUT > std::time::Duration::from_secs(60 * 60 * 24 * 365));
     }
 }
