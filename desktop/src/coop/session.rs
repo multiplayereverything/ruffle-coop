@@ -4,7 +4,7 @@
 use crate::coop::frame::Stepper;
 use crate::coop::keymap::Game;
 use crate::coop::lockstep::{InputFrame, Lockstep};
-use crate::coop::net::{Event, Link, Role, connect};
+use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
 use crate::coop::storage::SessionStorage;
@@ -15,7 +15,8 @@ use ruffle_core::frame_clock::FrameClock;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The sync check runs every this many frames.
@@ -28,6 +29,12 @@ const SHOW_WAITING: Duration = Duration::from_secs(2);
 /// noticed at once (the connection closes); this is for a connection that stays open but stalls,
 /// which an internet or relay hiccup does for several seconds (5 s ended a game over the relay).
 const GIVE_UP: Duration = Duration::from_secs(60);
+/// A stall this long is explained once in the log: frozen game, or nothing at all.
+const EXPLAIN_STALL: Duration = Duration::from_secs(5);
+/// A frame that runs this long on this PC is logged here (the others only see a stall).
+const SLOW_FRAME: Duration = Duration::from_secs(2);
+/// The heartbeat's period; a player heard from within 3 of them still has Ruffle running.
+const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
 pub const VERSION: &str = "1.0.3.4";
@@ -137,6 +144,75 @@ pub struct Session {
     timing: Timing,
     picture: PictureGate,
     state: SessionState,
+    heartbeat: Arc<Heartbeat>,
+    /// When each player's heartbeat last came, and the frame their game was at.
+    alive: HashMap<u8, (Instant, u32)>,
+    stall_explained: bool,
+    /// Tests: leave without a goodbye, as a killed Ruffle does.
+    #[cfg(test)]
+    vanish: bool,
+}
+
+/// What the heartbeat thread knows about this PC's game, shared with the session.
+struct Heartbeat {
+    epoch: Instant,
+    frame: AtomicU32,
+    /// When the frame that runs now started (ms after `epoch`, plus 1), or 0 between frames.
+    step_started: AtomicU64,
+}
+
+impl Heartbeat {
+    fn ms(&self) -> u64 {
+        self.epoch.elapsed().as_millis() as u64 + 1
+    }
+}
+
+/// Every second, whatever the game does: tells the others this PC's Ruffle is running (and at
+/// which frame), and logs here when this PC's own game is stuck in one frame. Ends with the
+/// session.
+fn start_heartbeat(heartbeat: Weak<Heartbeat>, sender: LinkSender, player: u8) {
+    std::thread::spawn(move || {
+        let mut logged_for = 0;
+        while let Some(beat) = heartbeat.upgrade() {
+            let frame = beat.frame.load(Ordering::Relaxed);
+            sender.send(&Msg::Alive { player, frame });
+            let started = beat.step_started.load(Ordering::Relaxed);
+            if started != 0 {
+                let stuck = Duration::from_millis(beat.ms().saturating_sub(started));
+                if stuck > EXPLAIN_STALL && logged_for != started {
+                    tracing::warn!(
+                        "Ruffle Together: this PC's game has been running frame {frame} for {} s \
+                         (stuck in the game's own scripts); the other players are waiting",
+                        stuck.as_secs()
+                    );
+                    logged_for = started;
+                }
+            }
+            drop(beat);
+            std::thread::sleep(HEARTBEAT);
+        }
+    });
+}
+
+/// Why `name`'s input hasn't come for `stalled`, from their heartbeat: `alive` is how long ago
+/// it last came and the frame their game was at then.
+fn stall_reason(name: &str, stalled: Duration, alive: Option<(Duration, u32)>) -> String {
+    match alive {
+        Some((ago, frame)) if ago < HEARTBEAT * 3 => format!(
+            "{name}'s Ruffle is still running, but its game hasn't moved past frame {frame} for {} s: \
+             it froze on that PC (its log says more)",
+            stalled.as_secs()
+        ),
+        Some((ago, _)) => format!(
+            "nothing at all from {name} for {} s: its Ruffle stopped (crashed, killed or frozen hard) \
+             or the network went down",
+            ago.as_secs()
+        ),
+        None => format!(
+            "nothing at all from {name} for {} s: its Ruffle stopped or the network went down",
+            stalled.as_secs()
+        ),
+    }
 }
 
 /// When the window shows a picture in a session: once per new game frame. Every key press and
@@ -539,6 +615,12 @@ impl Session {
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
             your_index + 1
         );
+        let heartbeat = Arc::new(Heartbeat {
+            epoch: Instant::now(),
+            frame: AtomicU32::new(0),
+            step_started: AtomicU64::new(0),
+        });
+        start_heartbeat(Arc::downgrade(&heartbeat), link.sender(), your_index);
         Ok(Session {
             link,
             lockstep: Lockstep::new(player_count, your_index, delay),
@@ -567,7 +649,17 @@ impl Session {
             timing: Timing::new(),
             picture: PictureGate::default(),
             state: SessionState::default(),
+            heartbeat,
+            alive: HashMap::new(),
+            stall_explained: false,
+            #[cfg(test)]
+            vanish: false,
         })
+    }
+
+    /// Sends on this session's link without the session (for a goodbye from a crash).
+    pub fn sender(&self) -> (LinkSender, u8) {
+        (self.link.sender(), self.local_index)
     }
 
     /// The clock the player must use (give it to `set_frame_clock` and a `FrameClockLocale`).
@@ -653,12 +745,15 @@ impl Session {
                         Msg::Bye { player: p, reason } if player_of(p) => {
                             self.close(format!("{} left ({reason})", self.name(p)));
                         }
+                        Msg::Alive { player: p, frame } if p != self.local_index && player_of(p) => {
+                            self.alive.insert(p, (Instant::now(), frame));
+                        }
                         _ => {}
                     }
                 }
                 Event::Left { player: conn } => {
                     if let Some(&slot) = self.peers.get(&conn) {
-                        self.close(format!("{} left", self.name(slot)));
+                        self.close(format!("{}'s connection closed {NO_GOODBYE}", self.name(slot)));
                     }
                 }
                 Event::Closed(reason) => self.close(reason),
@@ -695,8 +790,19 @@ impl Session {
                 self.local_sent += 1;
             }
             let step_started = Instant::now();
+            let frame = self.lockstep.frame();
+            self.heartbeat.frame.store(frame, Ordering::Relaxed);
+            self.heartbeat.step_started.store(self.heartbeat.ms(), Ordering::Relaxed);
             self.stepper.step(player, &inputs);
-            self.timing.step(step_started, step_started.elapsed(), frame_time);
+            self.heartbeat.step_started.store(0, Ordering::Relaxed);
+            let took = step_started.elapsed();
+            if took > SLOW_FRAME {
+                tracing::warn!(
+                    "Ruffle Together: frame {frame} took {:.1} s on this PC (the game's own scripts)",
+                    took.as_secs_f64()
+                );
+            }
+            self.timing.step(step_started, took, frame_time);
             // after a long stall, don't sprint through more than the catch-up allows
             self.next_due = Some((due + frame_time).max(now - frame_time * MAX_CATCH_UP));
             let frame = self.lockstep.frame();
@@ -732,12 +838,32 @@ impl Session {
         } else {
             vec![]
         };
+        if stalled > EXPLAIN_STALL && !self.stall_explained && !self.state.waiting_on.is_empty() {
+            for reason in self.stall_reasons(stalled) {
+                tracing::warn!("Ruffle Together: waiting: {reason}");
+            }
+            self.stall_explained = true;
+        } else if stalled < EXPLAIN_STALL {
+            self.stall_explained = false;
+        }
         if stalled > GIVE_UP && !self.state.waiting_on.is_empty() {
-            let who = self.state.waiting_on.join(", ");
-            self.close(format!("{who} stopped answering"));
+            let reason = self.stall_reasons(stalled).join("; ");
+            self.close(format!("stopped waiting: {reason}"));
             self.stepper.release_all(player);
         }
         self.state.clone()
+    }
+
+    /// Why each player this PC waits for hasn't sent their input (see `stall_reason`).
+    fn stall_reasons(&self, stalled: Duration) -> Vec<String> {
+        self.lockstep
+            .waiting_on()
+            .into_iter()
+            .map(|p| {
+                let alive = self.alive.get(&p).map(|(at, frame)| (at.elapsed(), *frame));
+                stall_reason(&self.name(p), stalled, alive)
+            })
+            .collect()
     }
 
     fn name(&self, player: u8) -> String {
@@ -877,6 +1003,10 @@ pub fn run_headless(mut session: Session, swf: &Path, frames: u32) -> Result<()>
 
 impl Drop for Session {
     fn drop(&mut self) {
+        #[cfg(test)]
+        if self.vanish {
+            return;
+        }
         self.link.send(&Msg::Bye {
             player: self.local_index,
             reason: "closed the game".into(),
@@ -1152,8 +1282,71 @@ mod tests {
         let left_at = Instant::now();
         drop(join_session);
         let (host_state, _) = host.join().expect("host");
-        assert!(host_state.closed.is_some(), "host still waiting");
+        assert_eq!(host_state.closed.as_deref(), Some("tester left (closed the game)"));
         assert!(left_at.elapsed() < Duration::from_secs(6));
+    }
+
+    /// The three ways a player stops, worded so a log tells them apart.
+    #[test]
+    fn a_stall_says_whether_the_game_froze_or_everything_stopped() {
+        let s = Duration::from_secs;
+        let frozen = stall_reason("Nick", s(7), Some((Duration::from_millis(400), 3024)));
+        assert!(frozen.contains("Nick's Ruffle is still running"), "{frozen}");
+        assert!(frozen.contains("frame 3024 for 7 s"), "{frozen}");
+        let gone = stall_reason("Nick", s(9), Some((s(8), 3024)));
+        assert!(gone.contains("nothing at all from Nick for 8 s"), "{gone}");
+        let never = stall_reason("Nick", s(9), None);
+        assert!(never.contains("nothing at all from Nick for 9 s"), "{never}");
+    }
+
+    /// A friend whose game is stuck in a frame still sends its heartbeat: the host can tell
+    /// that apart from a friend that is gone.
+    #[test]
+    fn a_frozen_friend_is_told_apart_by_its_heartbeat() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let friend_swf = swf.clone();
+        let friend = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            let addr = format!("127.0.0.1:{port}");
+            let (_, session) = play(opts(Role::JoinDirect { addr }, &friend_swf, 0), 5000, Some(100));
+            // the game "freezes": no more frames, but Ruffle (and its heartbeat) runs on
+            thread::sleep(Duration::from_secs(9));
+            drop(session);
+        });
+        let mut host = Session::start(opts(Role::HostDirect { port }, &swf, 0)).expect("session");
+        let player = headless_player(&swf, Some(host.clock()), host.take_storage()).expect("player");
+        let mut player = player.lock().expect("player");
+        let end = Instant::now() + Duration::from_secs(60);
+        let mut reasons = vec![];
+        while Instant::now() < end && host.tick(&mut player).closed.is_none() {
+            let stalled = host.last_frame_at.elapsed();
+            if stalled > EXPLAIN_STALL && reasons.is_empty() {
+                reasons = host.stall_reasons(stalled);
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        friend.join().expect("friend");
+        assert_eq!(reasons.len(), 1, "{reasons:?}");
+        assert!(reasons[0].contains("tester's Ruffle is still running"), "{reasons:?}");
+        assert_eq!(host.state.closed.as_deref(), Some("tester left (closed the game)"));
+    }
+
+    /// A Ruffle that is killed sends no goodbye: the others say the connection closed without one.
+    #[test]
+    fn a_friend_that_vanishes_is_reported_as_such() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(opts(Role::HostDirect { port }, &host_swf, 0), 5000, None));
+        thread::sleep(Duration::from_millis(300));
+        let addr = format!("127.0.0.1:{port}");
+        let (_, mut friend) = play(opts(Role::JoinDirect { addr }, &swf, 0), 5000, Some(100));
+        friend.vanish = true;
+        drop(friend);
+        let (host_state, _) = host.join().expect("host");
+        let closed = host_state.closed.unwrap_or_default();
+        assert!(closed.contains("tester's connection closed without a goodbye"), "{closed}");
     }
 
     /// Every PC sends its own mouse as its slot's mouse, and every PC sees all of them the same.

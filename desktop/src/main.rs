@@ -86,6 +86,11 @@ fn panic_hook(info: &PanicHookInfo) {
 
     let message = info.payload_as_str().unwrap_or("panic occurred");
 
+    // Ruffle Together: the crash goes in the log, and the other players hear why this PC left
+    // (before the dialog below, which waits for a click)
+    tracing::error!("Ruffle crashed: {info}");
+    coop::goodbye(&format!("Ruffle crashed: {message}"));
+
     if rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("Ruffle")
@@ -178,6 +183,9 @@ fn main() -> Result<(), Error> {
 
     // [NA] `_guard` cannot be `_` or it'll immediately drop
     // https://docs.rs/tracing-appender/latest/tracing_appender/non_blocking/index.html
+    if preferences.log_filename_pattern() == log::FilenamePattern::SingleFile {
+        log::keep_old_logs(&log_path, log::OLD_LOGS);
+    }
     let (non_blocking_file, _file_guard) = tracing_appender::non_blocking(File::create(log_path)?);
     let (non_blocking_stdout, _stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
 

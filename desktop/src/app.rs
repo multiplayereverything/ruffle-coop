@@ -80,6 +80,7 @@ impl MainWindow {
         }
         match event {
             WindowEvent::CloseRequested => {
+                crate::coop::goodbye("closed the game");
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {

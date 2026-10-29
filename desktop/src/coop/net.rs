@@ -86,13 +86,31 @@ pub struct Link {
     accepting: Arc<AtomicBool>,
 }
 
-impl Link {
+/// Sends on a link from another thread (the heartbeat) or when the game can't (a crash).
+#[derive(Clone)]
+pub struct LinkSender {
+    peers: Arc<Mutex<Vec<Peer>>>,
+}
+
+impl LinkSender {
     pub fn send(&self, msg: &Msg) {
         let line = encode(msg);
         if let Ok(peers) = self.peers.lock() {
             for peer in peers.iter() {
                 peer.write_line(&line);
             }
+        }
+    }
+}
+
+impl Link {
+    pub fn send(&self, msg: &Msg) {
+        self.sender().send(msg);
+    }
+
+    pub fn sender(&self) -> LinkSender {
+        LinkSender {
+            peers: self.peers.clone(),
         }
     }
 
@@ -328,8 +346,12 @@ fn friend_loop(mut reader: BufReader<TcpStream>, tx: Sender<Event>, relay: bool)
             let _ = tx.send(Event::Msg { from: 0, msg });
         }
     }
-    let _ = tx.send(Event::Closed("the host left".into()));
+    let _ = tx.send(Event::Closed(format!("the host's connection closed {NO_GOODBYE}")));
 }
+
+/// Why a connection closed without a Bye message (a closed window and a crash both send one).
+pub const NO_GOODBYE: &str =
+    "without a goodbye: its Ruffle was killed or froze and was ended, or the network dropped";
 
 #[cfg(test)]
 mod tests {

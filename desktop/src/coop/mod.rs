@@ -20,7 +20,27 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 static SESSION: OnceLock<Mutex<session::Session>> = OnceLock::new();
 
 pub fn set_session(session: session::Session) {
+    let _ = GOODBYE.set(session.sender());
     let _ = SESSION.set(Mutex::new(session));
+}
+
+/// The session's link, kept apart from the session so a goodbye still goes out when the
+/// session can't be reached (a crash while it is locked). The session itself is never dropped.
+static GOODBYE: OnceLock<(net::LinkSender, u8)> = OnceLock::new();
+static SAID_GOODBYE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tells the other players why this PC leaves ("closed the game", "Ruffle crashed: ..."), once,
+/// so their log says so instead of a connection that just closed.
+pub fn goodbye(reason: &str) {
+    if let Some((sender, player)) = GOODBYE.get()
+        && !SAID_GOODBYE.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        tracing::warn!("Ruffle Together: leaving: {reason}");
+        sender.send(&protocol::Msg::Bye {
+            player: *player,
+            reason: reason.to_string(),
+        });
+    }
 }
 
 /// The running session; None in normal (single-player) use, where nothing changes.

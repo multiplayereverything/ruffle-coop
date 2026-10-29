@@ -38,6 +38,9 @@ pub enum Msg {
     /// Host to a friend before the start: the round trip picks the input delay.
     Ping { seq: u32 },
     Pong { seq: u32 },
+    /// Sent every second by a thread of its own, whatever the game does: the player's Ruffle is
+    /// running, and its game is at `frame` (a frozen game keeps sending the same frame).
+    Alive { player: u8, frame: u32 },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -95,6 +98,7 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Refuse { id, reason } => format!("NO|{id:x}|{}", clean(reason)),
         Msg::Ping { seq } => format!("PI|{seq}"),
         Msg::Pong { seq } => format!("PO|{seq}"),
+        Msg::Alive { player, frame } => format!("AL|{player}|{frame}"),
     }
 }
 
@@ -197,6 +201,13 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             want(2)?;
             Ok(Msg::Pong { seq: uint(1)? })
         }
+        "AL" => {
+            want(3)?;
+            Ok(Msg::Alive {
+                player: byte(1)?,
+                frame: uint(2)?,
+            })
+        }
         _ => Err(bad()),
     }
 }
@@ -266,6 +277,7 @@ mod tests {
         });
         roundtrip(Msg::Ping { seq: 4 });
         roundtrip(Msg::Pong { seq: 4 });
+        roundtrip(Msg::Alive { player: 2, frame: 3024 });
     }
 
     #[test]
