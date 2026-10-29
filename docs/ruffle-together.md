@@ -29,8 +29,8 @@ ruffle_desktop --coop-join <host IP>:7801 --coop-name Sam BadIceCream_coop.swf
 Through the central relay with a room code (no IP needed):
 
 ```
-ruffle_desktop --coop-host-relay 195.60.166.57:25569 BadIceCream_coop.swf      (prints the room code)
-ruffle_desktop --coop-join-relay 195.60.166.57:25569 --coop-code ABCDE BadIceCream_coop.swf
+ruffle_desktop --coop-host-relay 165.232.82.11:25569 BadIceCream_coop.swf      (prints the room code)
+ruffle_desktop --coop-join-relay 165.232.82.11:25569 --coop-code ABCDE BadIceCream_coop.swf
 ```
 
 The relay needs the `ruffle-coop` game in mods-info first.
