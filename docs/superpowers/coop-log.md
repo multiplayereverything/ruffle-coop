@@ -273,3 +273,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   and a direct connection ran for minutes. The relay now runs on DigitalOcean Amsterdam, 165.232.82.11:25569
   (droplet `mods-relay`, systemd `mods-relay`): two Stealth Hunter 2 windows ran 7 min with no drop (user: smooth).
   mods-info servers.json points there (8c79139); Kinetic stays up for older clients.
+- Lobby (f21493d): the host sends waiting friends a Lobby message every 2 s, so an early friend no longer gives
+  up after 30 s; friends see who is in. Co-op saves (ae82f69): every PC writes the session's saves to
+  `<save dir>/coop/<game file>.save`, solo saves untouched, frozen after a desync; host picks the start with
+  `--coop-save coop|solo|new` (08ee769). MENU button, SH2 Esc (08fc160, not checked in-game).
+- Release v1.0.3.6 (user: "release it"): commit 1c5da5c on claude/ultimate-crab-battle-keys (API round 2 NOT in
+  it), tests 123/123, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay 165.232.82.11 room EMSHH 1500
+  frames in sync with the release exe, zip SHA-256 d44451fa...bc69, latest, re-downloaded hash matches. mods-info
+  918d218. Merged into local coop (with API round 2): 131/131.
