@@ -39,6 +39,16 @@ impl FilenamePattern {
     }
 }
 
+/// Where this run logs. Headless sessions (labs and tests, often several at once) write
+/// `ruffle-headless.log`, so they never push a player's own game logs out.
+pub fn log_path(pattern: FilenamePattern, directory: &Path, headless: bool) -> PathBuf {
+    if headless {
+        directory.join("ruffle-headless.log")
+    } else {
+        pattern.create_path(directory)
+    }
+}
+
 /// How many logs of earlier runs stay next to `ruffle.log` (as `ruffle.1.log` = the last run,
 /// `ruffle.2.log`, ...): a game that stopped can still be looked into after Ruffle starts again.
 pub const OLD_LOGS: usize = 5;
@@ -76,5 +86,13 @@ mod tests {
         assert_eq!(read("ruffle.3.log").as_deref(), Some("run 2"));
         assert_eq!(read("ruffle.4.log"), None, "only 3 old ones");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lab runs started six headless players at once and pushed a real game's log out.
+    #[test]
+    fn headless_runs_keep_their_own_log() {
+        let dir = Path::new("logs");
+        assert_eq!(log_path(FilenamePattern::SingleFile, dir, true), dir.join("ruffle-headless.log"));
+        assert_eq!(log_path(FilenamePattern::SingleFile, dir, false), dir.join("ruffle.log"));
     }
 }
