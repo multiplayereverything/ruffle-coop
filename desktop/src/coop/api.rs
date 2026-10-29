@@ -11,7 +11,7 @@
 //! ExternalInterface.call("coop.options")         every setting, as an object
 //! ExternalInterface.call("coop.ping", slot)      this PC's round trip to that player, ms (display only: differs per PC)
 //! ExternalInterface.call("coop.pause")           pauses the game for everyone (any player's Esc resumes)
-//! ExternalInterface.call("coop.events")          what happened since the last call: ["join 0", "leave 2", ...]
+//! ExternalInterface.call("coop.events")          what happened since the last call: ["join 0", "leave 2", "chat 1 gg", ...]
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause", "events"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause", "events", "chat"];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;

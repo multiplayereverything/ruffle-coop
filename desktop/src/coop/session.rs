@@ -35,6 +35,10 @@ const EXPLAIN_STALL: Duration = Duration::from_secs(5);
 const SLOW_FRAME: Duration = Duration::from_secs(2);
 /// The heartbeat's period; a player heard from within 3 of them still has Ruffle running.
 const HEARTBEAT: Duration = Duration::from_secs(1);
+/// The longest chat line.
+const CHAT_MAX: usize = 120;
+/// How long a chat line stays on screen.
+const CHAT_SHOWN: Duration = Duration::from_secs(12);
 /// How often the host measures every friend's round trip (`coop.ping`).
 const PING_EVERY: Duration = Duration::from_secs(2);
 
@@ -161,6 +165,14 @@ pub struct Session {
     ping_sent: Option<(u32, Instant)>,
     /// A short message for the window ("Sam left"), and when it came.
     notice: Option<(String, Instant)>,
+    /// The chat box while it is open (what's typed so far); keys go there, not to the game.
+    chat_box: Option<String>,
+    /// This PC's chat line, sent with the next input.
+    chat_to_send: Option<String>,
+    /// Chat lines by the frame the games hear them on.
+    chat_at: std::collections::BTreeMap<u32, Vec<(u8, String)>>,
+    /// Chat lines heard (name, text, when), for the window.
+    chat_log: VecDeque<(String, String, Instant)>,
     stall_explained: bool,
     /// Tests: leave without a goodbye, as a killed Ruffle does.
     #[cfg(test)]
@@ -677,6 +689,10 @@ impl Session {
             round_trips: [None; crate::coop::lockstep::MAX_PLAYERS],
             ping_sent: None,
             notice: None,
+            chat_box: None,
+            chat_to_send: None,
+            chat_at: Default::default(),
+            chat_log: VecDeque::new(),
             stall_explained: false,
             #[cfg(test)]
             vanish: false,
@@ -710,6 +726,31 @@ impl Session {
     }
 
     pub fn key(&mut self, key: PhysicalKey, down: bool) {
+        if let Some(text) = &mut self.chat_box {
+            if down {
+                match key {
+                    PhysicalKey::Enter | PhysicalKey::NumpadEnter => {
+                        let line: String = text.trim().chars().take(CHAT_MAX).collect();
+                        if !line.is_empty() {
+                            self.chat_to_send = Some(line);
+                        }
+                        self.chat_box = None;
+                    }
+                    PhysicalKey::Escape => self.chat_box = None,
+                    PhysicalKey::Backspace => {
+                        text.pop();
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+        // "/" opens the chat box, unless the key map gives it to the game
+        if down && key == PhysicalKey::Slash && !self.game.has_local_code(191) {
+            self.chat_box = Some(String::new());
+            self.held.clear();
+            return;
+        }
         if down {
             self.held.insert(key);
         } else {
@@ -728,6 +769,13 @@ impl Session {
     /// the game reads `coop.typed`; otherwise only a key of the key map types (keyPress buttons),
     /// so a stray key can't trigger a game's shortcut for everyone.
     pub fn typed(&mut self, c: char, text_box: bool) {
+        if let Some(text) = &mut self.chat_box {
+            // the "/" that opened the box types itself too: leave it out
+            if !(text.is_empty() && c == '/') && !c.is_control() && !crate::coop::lockstep::is_text_control(c) && text.chars().count() < CHAT_MAX {
+                text.push(c);
+            }
+            return;
+        }
         let wanted = text_box || self.stepper.wants_text();
         let text_key = crate::coop::lockstep::is_text_control(c);
         if self.focused && (wanted || (!text_key && self.game.has_local_char(c))) {
@@ -811,6 +859,10 @@ impl Session {
                                 self.round_trips[slot as usize] = Some(at.elapsed().as_millis() as u32);
                             }
                         }
+                        Msg::Chat { player: p, frame, text } if p != self.local_index && player_of(p) => {
+                            let text: String = text.chars().filter(|c| !c.is_control()).take(CHAT_MAX).collect();
+                            self.chat_at.entry(frame).or_default().push((p, text));
+                        }
                         Msg::Pings { ms } if !self.hosting => {
                             for (slot, ms) in ms.into_iter().enumerate().take(self.round_trips.len()) {
                                 self.round_trips[slot] = ms;
@@ -867,6 +919,11 @@ impl Session {
             while self.local_sent <= self.lockstep.frame() {
                 let input = self.local_input();
                 let (frame, input) = self.lockstep.push_local(input);
+                // a chat line goes just before its frame's input, so every game hears it then
+                if let Some(text) = self.chat_to_send.take() {
+                    self.link.send(&Msg::Chat { player: self.local_index, frame, text: text.clone() });
+                    self.chat_at.entry(frame).or_default().push((self.local_index, text));
+                }
                 self.taken_at.insert(frame, Instant::now());
                 self.link.send(&Msg::Input { player: self.local_index, frame, input });
                 self.local_sent += 1;
@@ -877,6 +934,16 @@ impl Session {
             self.heartbeat.step_started.store(self.heartbeat.ms(), Ordering::Relaxed);
             for slot in self.lockstep.leaving_now() {
                 self.stepper.add_event(format!("leave {slot}"));
+            }
+            if let Some(mut lines) = self.chat_at.remove(&frame) {
+                lines.sort_by_key(|(slot, _)| *slot);
+                for (slot, text) in lines {
+                    self.stepper.add_event(format!("chat {slot} {text}"));
+                    self.chat_log.push_back((self.name(slot), text, Instant::now()));
+                    if self.chat_log.len() > 8 {
+                        self.chat_log.pop_front();
+                    }
+                }
             }
             self.stepper.step(player, &inputs);
             self.heartbeat.step_started.store(0, Ordering::Relaxed);
@@ -973,6 +1040,17 @@ impl Session {
         self.peers.retain(|_, s| *s != slot);
         tracing::warn!("Ruffle Together: {reason}; the others play on from frame {frame}");
         self.notice = Some((reason, Instant::now()));
+    }
+
+    /// For the window: recent chat lines ("Sam: gg") and the open chat box's text, if open.
+    pub fn chat_view(&self) -> (Vec<String>, Option<String>) {
+        let lines = self
+            .chat_log
+            .iter()
+            .filter(|(.., at)| self.chat_box.is_some() || at.elapsed() < CHAT_SHOWN)
+            .map(|(name, text, _)| format!("{name}: {text}"))
+            .collect();
+        (lines, self.chat_box.clone())
     }
 
     /// A message for the window while it's fresh (a few seconds): "Sam left".
@@ -1321,6 +1399,51 @@ mod tests {
         assert!(host_to_friend < 500 && friend_to_host < 500, "{host_to_friend} {friend_to_host} ms on one PC");
         assert_eq!(join.pings()[1], Some(0));
         assert_eq!(join.pings()[2], None, "only 2 players");
+    }
+
+    /// The chat box: "/" opens it (keys stop reaching the game), typing fills it, Enter sends the
+    /// line, and every PC's game hears it as an event; both windows show it.
+    #[test]
+    fn a_chat_line_reaches_every_game() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let run = |opts: SessionOpts, chat: bool| {
+            let swf = opts.swf.clone();
+            let mut session = Session::start(opts).expect("session");
+            let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+            let mut player = player.lock().expect("player");
+            let end = Instant::now() + Duration::from_secs(60);
+            let mut said = false;
+            while Instant::now() < end && session.state.closed.is_none() && session.frame() < 300 {
+                if chat && !said && session.frame() >= 50 {
+                    session.key(PhysicalKey::Slash, true);
+                    session.typed('/', false);
+                    assert_eq!(session.chat_view().1.as_deref(), Some(""), "open, without the /");
+                    for c in "hi therex".chars() {
+                        session.typed(c, false);
+                    }
+                    session.key(PhysicalKey::Backspace, true);
+                    session.key(PhysicalKey::Enter, true);
+                    assert_eq!(session.chat_view().1, None, "Enter closes it");
+                    said = true;
+                }
+                session.tick(&mut player);
+                thread::sleep(Duration::from_millis(1));
+            }
+            session
+        };
+        let host = thread::spawn(move || run(opts(Role::HostDirect { port }, &host_swf, 0), true));
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || run(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0), false));
+        let (host, join) = (host.join().expect("host"), join.join().expect("join"));
+        for session in [&host, &join] {
+            let events = session.stepper.api().lock().expect("api").events.clone();
+            assert!(events.contains(&"chat 0 hi there".to_string()), "{events:?}");
+            assert_eq!(session.chat_view().0, vec!["tester: hi there".to_string()]);
+        }
+        assert_eq!(host.state.desync_at, None);
+        assert_eq!(join.state.desync_at, None);
     }
 
     /// The host's `--coop-option`s reach every player's `coop.option`; a friend's own are ignored.

@@ -161,6 +161,11 @@ impl Game {
     }
 
     /// This PC's buttons from the keys held right now.
+    /// Whether this PC's keys include the key with this Flash key code.
+    pub fn has_local_code(&self, code: u32) -> bool {
+        self.local.iter().any(|(local, _)| *local == code)
+    }
+
     /// Whether one of this PC's mapped keys types `c` (a letter, digit or space).
     pub fn has_local_char(&self, c: char) -> bool {
         let code = match c {

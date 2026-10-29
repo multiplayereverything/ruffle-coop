@@ -48,6 +48,8 @@ pub enum Msg {
     Pings { ms: Vec<Option<u32>> },
     /// Host to everyone: `player` left; from `frame` on they hold nothing (every PC the same).
     Left { player: u8, frame: u32 },
+    /// A chat line, heard by every game on `frame` (sent just before that frame's input).
+    Chat { player: u8, frame: u32, text: String },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -119,6 +121,10 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Pong { seq } => format!("PO|{seq}"),
         Msg::Alive { player, frame } => format!("AL|{player}|{frame}"),
         Msg::Left { player, frame } => format!("LF|{player}|{frame}"),
+        Msg::Chat { player, frame, text } => {
+            let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+            format!("CH|{player}|{frame}|{hex}")
+        }
         Msg::Pings { ms } => {
             let ms: Vec<String> = ms.iter().map(|ms| ms.map_or("-".into(), |ms| ms.to_string())).collect();
             format!("PG|{}", ms.join(","))
@@ -249,6 +255,11 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             want(2)?;
             Ok(Msg::Pong { seq: uint(1)? })
         }
+        "CH" => {
+            want(4)?;
+            let text = String::from_utf8(unhex(parts[3]).ok_or_else(bad)?).map_err(|_| bad())?;
+            Ok(Msg::Chat { player: byte(1)?, frame: uint(2)?, text })
+        }
         "LF" => {
             want(3)?;
             Ok(Msg::Left { player: byte(1)?, frame: uint(2)? })
@@ -329,6 +340,7 @@ mod tests {
             },
         });
         roundtrip(Msg::Left { player: 2, frame: 1234 });
+        roundtrip(Msg::Chat { player: 1, frame: 99, text: "gg | well played, été!".into() });
         roundtrip(Msg::Pings { ms: vec![Some(0), Some(162), None, Some(4000)] });
         roundtrip(Msg::Print {
             player: 1,
