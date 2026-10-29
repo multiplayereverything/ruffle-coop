@@ -264,6 +264,10 @@ impl GameKeys {
             let (was, is) = (before & game_key.button != 0, buttons & game_key.button != 0);
             if is && !was {
                 events.push(PlayerEvent::KeyDown { key: game_key.key });
+                // a real keyboard also types the character: on(keyPress "1") and text fields hear it
+                if let LogicalKey::Character(codepoint) = game_key.key.logical_key {
+                    events.push(PlayerEvent::TextInput { codepoint });
+                }
             } else if was && !is {
                 events.push(PlayerEvent::KeyUp { key: game_key.key });
             }
@@ -548,6 +552,36 @@ mod tests {
         ] {
             assert_eq!(ucb.local_buttons(&held(&[key])), button, "{key:?}");
         }
+    }
+
+    /// AS2 buttons' on(keyPress "1") and text fields hear the typed character, not the key: a
+    /// key press also types its character, as a real keyboard does. Named keys (arrows, Enter)
+    /// type nothing; buttons match those from the key itself.
+    #[test]
+    fn a_key_press_types_its_character() {
+        let typed = |events: &[PlayerEvent]| -> Vec<char> {
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    PlayerEvent::TextInput { codepoint } => Some(*codepoint),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut keys = game("ultimate-crab-battle").keys();
+        let events = keys.events(0, KEY1);
+        assert_eq!(typed(&events), vec!['1']);
+        let down = events.iter().position(|e| matches!(e, PlayerEvent::KeyDown { .. }));
+        let text = events.iter().position(|e| matches!(e, PlayerEvent::TextInput { .. }));
+        assert!(down < text, "the key goes down before its character, as from winit");
+        assert!(typed(&keys.events(0, KEY1)).is_empty(), "held: typed once");
+        assert!(typed(&keys.events(0, 0)).is_empty(), "a release types nothing");
+        assert_eq!(typed(&keys.events(1, FIRE)), vec!['u']);
+        assert!(typed(&keys.events(0, UP | ALT)).is_empty(), "arrows and Ctrl type nothing");
+        // shared keys type once, when the first player presses them
+        let mut keys = game("territory-war").keys();
+        assert_eq!(typed(&keys.events(0, KEY1)), vec!['1']);
+        assert!(typed(&keys.events(1, KEY1)).is_empty());
     }
 
     #[test]
