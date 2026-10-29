@@ -43,6 +43,9 @@ pub enum Msg {
     /// Sent every second by a thread of its own, whatever the game does: the player's Ruffle is
     /// running, and its game is at `frame` (a frozen game keeps sending the same frame).
     Alive { player: u8, frame: u32 },
+    /// Host to everyone, every few seconds: each player's round trip to the host, in ms (slot
+    /// order; None until measured), for `coop.ping`.
+    Pings { ms: Vec<Option<u32>> },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -113,6 +116,10 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Ping { seq } => format!("PI|{seq}"),
         Msg::Pong { seq } => format!("PO|{seq}"),
         Msg::Alive { player, frame } => format!("AL|{player}|{frame}"),
+        Msg::Pings { ms } => {
+            let ms: Vec<String> = ms.iter().map(|ms| ms.map_or("-".into(), |ms| ms.to_string())).collect();
+            format!("PG|{}", ms.join(","))
+        }
     }
 }
 
@@ -239,6 +246,16 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             want(2)?;
             Ok(Msg::Pong { seq: uint(1)? })
         }
+        "PG" => {
+            want(2)?;
+            let ms = parts[1]
+                .split(',')
+                .map(|ms| if ms == "-" { Some(None) } else { ms.parse().ok().map(Some) })
+                .collect::<Option<Vec<_>>>()
+                .filter(|ms| ms.len() <= crate::coop::lockstep::MAX_PLAYERS)
+                .ok_or_else(bad)?;
+            Ok(Msg::Pings { ms })
+        }
         "AL" => {
             want(3)?;
             Ok(Msg::Alive {
@@ -304,6 +321,7 @@ mod tests {
                 ..Default::default()
             },
         });
+        roundtrip(Msg::Pings { ms: vec![Some(0), Some(162), None, Some(4000)] });
         roundtrip(Msg::Print {
             player: 1,
             frame: 25,

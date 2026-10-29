@@ -35,6 +35,8 @@ const EXPLAIN_STALL: Duration = Duration::from_secs(5);
 const SLOW_FRAME: Duration = Duration::from_secs(2);
 /// The heartbeat's period; a player heard from within 3 of them still has Ruffle running.
 const HEARTBEAT: Duration = Duration::from_secs(1);
+/// How often the host measures every friend's round trip (`coop.ping`).
+const PING_EVERY: Duration = Duration::from_secs(2);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
 pub const VERSION: &str = "1.0.3.4";
@@ -153,6 +155,10 @@ pub struct Session {
     heartbeat: Arc<Heartbeat>,
     /// When each player's heartbeat last came, and the frame their game was at.
     alive: HashMap<u8, (Instant, u32)>,
+    /// Each player's round trip to the host (the host measures, then tells everyone).
+    round_trips: [Option<u32>; crate::coop::lockstep::MAX_PLAYERS],
+    /// Host: the last ping sent, when, and its number.
+    ping_sent: Option<(u32, Instant)>,
     stall_explained: bool,
     /// Tests: leave without a goodbye, as a killed Ruffle does.
     #[cfg(test)]
@@ -663,6 +669,8 @@ impl Session {
             state: SessionState::default(),
             heartbeat,
             alive: HashMap::new(),
+            round_trips: [None; crate::coop::lockstep::MAX_PLAYERS],
+            ping_sent: None,
             stall_explained: false,
             #[cfg(test)]
             vanish: false,
@@ -779,6 +787,19 @@ impl Session {
                         Msg::Alive { player: p, frame } if p != self.local_index && player_of(p) => {
                             self.alive.insert(p, (Instant::now(), frame));
                         }
+                        Msg::Ping { seq } if !self.hosting => self.link.send(&Msg::Pong { seq }),
+                        Msg::Pong { seq } if self.hosting => {
+                            if let Some((sent, at)) = self.ping_sent
+                                && sent == seq
+                            {
+                                self.round_trips[slot as usize] = Some(at.elapsed().as_millis() as u32);
+                            }
+                        }
+                        Msg::Pings { ms } if !self.hosting => {
+                            for (slot, ms) in ms.into_iter().enumerate().take(self.round_trips.len()) {
+                                self.round_trips[slot] = ms;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -797,6 +818,15 @@ impl Session {
         }
 
         let now = Instant::now();
+        if self.hosting && self.ping_sent.is_none_or(|(_, at)| now - at >= PING_EVERY) {
+            // the last round's results go out, then the next round starts
+            self.round_trips[0] = Some(0);
+            self.link.send(&Msg::Pings { ms: self.round_trips.to_vec() });
+            let seq = self.ping_sent.map_or(1_000_000, |(seq, _)| seq + 1);
+            self.link.send(&Msg::Ping { seq });
+            self.ping_sent = Some((seq, now));
+        }
+        self.stepper.set_pings(self.pings());
         self.timing.tick(now);
         let frame_time = Duration::from_secs_f64(1.0 / player.frame_rate());
         for _ in 0..MAX_CATCH_UP {
@@ -979,6 +1009,25 @@ impl Session {
     }
 
     /// The next frame to run (for logs).
+    /// This PC's round trip to each player, in ms (`coop.ping`): to the host it's this PC's own;
+    /// to another friend it goes through the host, so both trips add up; to itself it's 0.
+    pub fn pings(&self) -> [Option<u32>; crate::coop::lockstep::MAX_PLAYERS] {
+        let me = self.local_index as usize;
+        let mut pings = [None; crate::coop::lockstep::MAX_PLAYERS];
+        for (slot, ping) in pings.iter_mut().enumerate().take(self.names.len()) {
+            *ping = if slot == me {
+                Some(0)
+            } else if self.hosting {
+                self.round_trips[slot]
+            } else if slot == 0 {
+                self.round_trips[me]
+            } else {
+                self.round_trips[me].zip(self.round_trips[slot]).map(|(a, b)| a + b)
+            };
+        }
+        pings
+    }
+
     /// The name tags the game asked for (`coop.label`), for the window to draw.
     pub fn labels(&self) -> Vec<crate::coop::api::Label> {
         self.stepper.labels()
@@ -1177,6 +1226,45 @@ mod tests {
         // the same game on both PCs, checked every 25 frames (frames 24, 49, ... 974 are check frames)
         assert_eq!(host_session.print_at(974), join_session.print_at(974));
         assert!(host_session.print_at(974).is_some());
+    }
+
+    /// The host measures every friend's round trip and tells everyone: both PCs know the ping
+    /// between them (`coop.ping`) after a couple of rounds.
+    #[test]
+    fn both_pcs_learn_their_ping() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let run = |opts: SessionOpts| {
+            let swf = opts.swf.clone();
+            let mut session = Session::start(opts).expect("session");
+            let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+            let mut player = player.lock().expect("player");
+            let end = Instant::now() + Duration::from_secs(6);
+            while Instant::now() < end && session.state.closed.is_none() {
+                session.tick(&mut player);
+                thread::sleep(Duration::from_millis(5));
+            }
+            session
+        };
+        let host = thread::spawn(move || {
+            let mut opts = opts(Role::HostDirect { port }, &host_swf, 0);
+            opts.paced = true;
+            run(opts)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let mut opts = opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0);
+            opts.paced = true;
+            run(opts)
+        });
+        let (host, join) = (host.join().expect("host"), join.join().expect("join"));
+        assert_eq!(host.pings()[0], Some(0), "to itself");
+        let host_to_friend = host.pings()[1].expect("the host measured the friend");
+        let friend_to_host = join.pings()[0].expect("the friend heard its round trip");
+        assert!(host_to_friend < 500 && friend_to_host < 500, "{host_to_friend} {friend_to_host} ms on one PC");
+        assert_eq!(join.pings()[1], Some(0));
+        assert_eq!(join.pings()[2], None, "only 2 players");
     }
 
     /// The host's `--coop-option`s reach every player's `coop.option`; a friend's own are ignored.

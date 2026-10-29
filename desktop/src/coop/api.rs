@@ -9,6 +9,7 @@
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
+//! ExternalInterface.call("coop.ping", slot)      this PC's round trip to that player, ms (display only: differs per PC)
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
@@ -33,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping"];
 
 /// A game that called `coop.typed` within this many frames gets every typed character.
 const WANTS_TEXT_FRAMES: u32 = 60;
@@ -61,6 +62,8 @@ pub struct CoopApi {
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
+    /// This PC's round trip to each player in ms (differs per PC, like `local_slot`).
+    pub pings: [Option<u32>; MAX_PLAYERS],
     /// The host's game settings, the same on every PC.
     pub options: Vec<(String, String)>,
     /// Each slot's typed characters this frame.
@@ -89,6 +92,7 @@ impl CoopApi {
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
             options: vec![],
+            pings: [None; MAX_PLAYERS],
             frame: 0,
             typed_read_at: None,
             names: vec![],
@@ -158,6 +162,7 @@ impl CoopApi {
                     .collect();
                 Value::String(text)
             }
+            ("coop.ping", Some(slot)) => self.pings[slot].map_or(Value::Undefined, |ms| Value::Number(ms.into())),
             ("coop.option", _) => text(0)
                 .and_then(|name| self.options.iter().find(|(n, _)| *n == name))
                 .map_or(Value::Undefined, |(_, value)| Value::String(value.clone())),
@@ -331,6 +336,16 @@ mod tests {
             api.update(&[InputFrame::default(), InputFrame::default()]);
         }
         assert!(!api.wants_text(), "not read for a while");
+    }
+
+    #[test]
+    fn pings_per_slot() {
+        let mut api = CoopApi::new(3, 1);
+        api.pings = [Some(80), Some(0), None, None];
+        assert_eq!(api.answer("coop.ping", &[n(0.0)]), n(80.0));
+        assert_eq!(api.answer("coop.ping", &[n(1.0)]), n(0.0));
+        assert_eq!(api.answer("coop.ping", &[n(2.0)]), Value::Undefined, "not measured yet");
+        assert_eq!(api.answer("coop.ping", &[n(3.0)]), Value::Undefined, "no slot 3");
     }
 
     #[test]

@@ -102,6 +102,13 @@ impl Stepper {
         self.api.lock().is_ok_and(|api| api.wants_text())
     }
 
+    /// This PC's round trip to each player, for `coop.ping`.
+    pub fn set_pings(&mut self, pings: [Option<u32>; crate::coop::lockstep::MAX_PLAYERS]) {
+        if let Ok(mut api) = self.api.lock() {
+            api.pings = pings;
+        }
+    }
+
     /// The host's game settings, for `coop.option`.
     pub fn set_options(&mut self, options: &[(String, String)]) {
         if let Ok(mut api) = self.api.lock() {
