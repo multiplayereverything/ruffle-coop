@@ -39,6 +39,9 @@ at the end), `docs/superpowers/coop-decisions.md`. Game-builder spec sent to eve
 4. Undelivered: **Bow Man** (local_b466301b…) reply failed ("workspace requires trust approval"): its map + API are in the
    spec. Queued: mod-folders parent, Stealth Hunter 2, Raft Wars (API spec). Raft Wars uses gun-mayhem-2 (no new map).
 5. Not supported (said so): per-PC camera/views, >4 players, mid-game joins.
+6. Confirmed by the Ultimate Assassin session (local_f53b835c…): `stealth-assassin` works on the test build (2p replay
+   = gun-mayhem-2's fingerprints; `p0 KEY1` = Space pauses). It will send .keys files for Ultimate Assassin 3, 2, 1:
+   add each as a built-in (file + BUILT_IN entry) for the next release.
 
 ## Build / test
 - `cargo build -p ruffle_desktop --release`; tests: `COOP_TEST_SWF=<BadIceCream_coop.swf> cargo test -p ruffle_desktop --release -- --test-threads=1`.
