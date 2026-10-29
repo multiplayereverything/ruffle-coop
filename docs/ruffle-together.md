@@ -76,7 +76,7 @@ The relay needs the `ruffle-coop` game in mods-info first.
 
 `--coop-keys` takes a built-in map name or the path of a key map file (every player must use the same map; a
 different one is refused by name). Built in: bad-ice-cream, gun-mayhem-2, territory-war, bow-man, smileys-war,
-stealth-assassin, stealth-hunter-2, intrusion, intrusion-2, air-battle, ultimate-crab-battle (the files are in `desktop/src/coop/keys/`).
+stealth-assassin, stealth-hunter-2, intrusion, intrusion-2, air-battle, ultimate-crab-battle, fireboy-watergirl (the files are in `desktop/src/coop/keys/`).
 
 ```
 # comment
