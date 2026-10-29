@@ -219,3 +219,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   existing key test kept. 107/107. Replays identical to before for BIC (fa623659), GM2 4p (8e30f66c) and TW
   (8f0d87b8); GM2 from a .keys file = built in. Test build: test-build/ruffle_desktop.exe + *.keys (target/release
   exe locked by another session's processes). Not released.
+  Spec for game sessions: side-session-notes/.../ruffle-together-api-and-keymaps.md; sent to the mod-folders parent
+  (queued) and to Territory War, Smileys War, Stealth Assassin (UA series), Air Battle, Intrusion 1, Intrusion 2,
+  Stealth Hunter 2 (queued). Bow Man's reply was NOT delivered (its workspace needs the user's trust approval).
