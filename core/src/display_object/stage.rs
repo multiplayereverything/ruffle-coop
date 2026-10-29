@@ -88,6 +88,10 @@ pub struct StageData<'gc> {
     /// identity matrix unless explicitly set from ActionScript)
     viewport_matrix: Cell<Matrix>,
 
+    /// Ruffle Together: this PC's camera, applied after the viewport matrix when drawing to the
+    /// screen only (never in `BitmapData.draw`), so it changes the picture and not the game.
+    coop_camera: Cell<Matrix>,
+
     /// Matrix used for rendering the letterbox.
     ///
     /// It represents the transformation of the whole window into the
@@ -187,6 +191,7 @@ impl<'gc> Stage<'gc> {
                 stage3ds: RefLock::new(vec![]),
                 movie: Lock::new(movie),
                 viewport_matrix: Cell::new(Matrix::IDENTITY),
+                coop_camera: Cell::new(Matrix::IDENTITY),
                 letterbox_matrix: Cell::new(Matrix::IDENTITY),
                 focus_tracker: FocusTracker::new(gc_context),
             },
@@ -214,6 +219,14 @@ impl<'gc> Stage<'gc> {
 
     pub fn view_matrix(self) -> Matrix {
         self.0.viewport_matrix.get()
+    }
+
+    pub fn coop_camera(self) -> Matrix {
+        self.0.coop_camera.get()
+    }
+
+    pub fn set_coop_camera(self, camera: Matrix) {
+        self.0.coop_camera.set(camera);
     }
 
     pub fn letterbox(self) -> Letterbox {
@@ -622,7 +635,7 @@ impl<'gc> Stage<'gc> {
     /// in FP by checking which stuff can be rendered using `BitmapData.draw`.
     pub fn render_viewport(self, context: &mut RenderContext<'_, 'gc>) {
         context.transform_stack.push(&Transform {
-            matrix: self.0.viewport_matrix.get(),
+            matrix: self.0.viewport_matrix.get() * self.0.coop_camera.get(),
             color_transform: Default::default(),
             // TODO: Verify perspective_projection when its rendering is implemented.
             perspective_projection: self.as_displayobject().base().perspective_projection(),

@@ -982,11 +982,40 @@ impl Player {
     }
 
     /// Ruffle Together: a window position as stage twips, which mean the same spot on every PC
-    /// whatever its window size.
+    /// whatever its window size and this PC's camera.
     pub fn viewport_to_stage(&mut self, x: f64, y: f64) -> (i32, i32) {
-        let matrix = self.mutate_with_update_context(|context| context.stage.inverse_view_matrix());
+        let matrix = self.mutate_with_update_context(|context| {
+            (context.stage.view_matrix() * context.stage.coop_camera())
+                .inverse()
+                .unwrap_or(Matrix::ZERO)
+        });
         let point = matrix * Point::from_pixels(x, y);
         (point.x.get(), point.y.get())
+    }
+
+    /// Ruffle Together: this PC's camera, showing the stage point (x, y) (stage pixels) at the
+    /// middle of the screen `zoom` times bigger; None shows the stage as it is.
+    pub fn set_coop_camera(&mut self, camera: Option<(f64, f64, f64)>) {
+        self.mutate_with_update_context(|context| {
+            let matrix = camera.map_or(Matrix::IDENTITY, |(x, y, zoom)| {
+                let (width, height) = context.stage.movie_size();
+                crate::coop_view::camera_matrix(width as f64, height as f64, x, y, zoom)
+            });
+            if matrix != context.stage.coop_camera() {
+                context.stage.set_coop_camera(matrix);
+                *context.needs_render = true;
+            }
+        });
+    }
+
+    /// Ruffle Together: where a label above the clip at `path` goes in the window (pixels),
+    /// through this PC's camera; None if there is no such clip on show.
+    pub fn coop_label_position(&mut self, path: &str) -> Option<(f64, f64)> {
+        self.mutate_with_update_context(|context| {
+            let (x, y) = crate::coop_view::label_anchor(context, path)?;
+            let point = context.stage.view_matrix() * context.stage.coop_camera() * Point::new(x, y);
+            Some((point.x.to_pixels(), point.y.to_pixels()))
+        })
     }
 
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).

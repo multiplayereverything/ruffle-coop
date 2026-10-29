@@ -148,14 +148,18 @@ fn offscreen_renderer(width: u32, height: u32) -> Result<WgpuRenderBackend<Textu
 }
 
 fn save_shot(player: &mut Player, path: &Path) -> Result<()> {
+    capture(player)?.save(path)?;
+    Ok(())
+}
+
+/// The picture a headless player draws now.
+pub(crate) fn capture(player: &mut Player) -> Result<image::RgbaImage> {
     player.render();
     let renderer = <dyn std::any::Any>::downcast_mut::<WgpuRenderBackend<TextureTarget>>(
         player.renderer_mut(),
     )
     .context("screenshots need the offscreen renderer")?;
-    let image = renderer.capture_frame().context("capture failed")?;
-    image.save(path)?;
-    Ok(())
+    renderer.capture_frame().context("capture failed")
 }
 
 /// The `--coop-replay` command line.

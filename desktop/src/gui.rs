@@ -104,6 +104,11 @@ impl RuffleGui {
             show_lobby(egui_ui, &lobby);
         }
 
+        if let Some(player) = player.as_deref_mut() {
+            let labels = crate::coop::session().map(|session| session.labels()).unwrap_or_default();
+            show_labels(egui_ctx, player, &labels, menu_height_offset);
+        }
+
         if let Some(player) = player {
             let was_suspended = player.debug_ui().should_suspend_player();
             player.show_debug_ui(egui_ctx, menu_height_offset);
@@ -182,6 +187,30 @@ impl RuffleGui {
             .recreate_open_dialog(opt, Some(content_descriptor), self.event_loop.clone());
 
         player.set_volume(self.dialogs.volume_controls.get_volume());
+    }
+}
+
+/// Ruffle Together: the game's name tags (`coop.label`), above their clips as this PC's camera
+/// shows them. They are drawn over the game, never in it, so they can't change the game.
+fn show_labels(
+    egui_ctx: &egui::Context,
+    player: &mut Player,
+    labels: &[crate::coop::api::Label],
+    menu_height_offset: f64,
+) {
+    if labels.is_empty() {
+        return;
+    }
+    let painter = egui_ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("coop-labels")));
+    let points = egui_ctx.pixels_per_point() as f64;
+    for label in labels {
+        let Some((x, y)) = player.coop_label_position(&label.path) else {
+            continue;
+        };
+        let at = pos2((x / points) as f32, ((y + menu_height_offset) / points) as f32 - 4.0);
+        let font = FontId::proportional(14.0);
+        painter.text(at + vec2(1.0, 1.0), Align2::CENTER_BOTTOM, &label.text, font.clone(), Color32::BLACK);
+        painter.text(at, Align2::CENTER_BOTTOM, &label.text, font, Color32::WHITE);
     }
 }
 
