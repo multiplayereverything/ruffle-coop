@@ -127,6 +127,11 @@ pub struct CoopOpt {
     #[clap(long = "coop-option", value_name = "NAME=VALUE", help_heading = "Ruffle Together")]
     pub coop_option: Vec<String>,
 
+    /// The game's id in mods-info (e.g. gm2), from the launcher: a relay host's Discord profile
+    /// then gets a Join button (ruffle-together://join/ID/CODE through the join page).
+    #[clap(long, value_name = "ID", help_heading = "Ruffle Together")]
+    pub coop_link_id: Option<String>,
+
     /// Your name, shown to the other players.
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]
     pub coop_name: String,

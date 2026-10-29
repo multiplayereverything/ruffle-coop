@@ -66,6 +66,8 @@ pub struct SessionOpts {
     pub script: Option<Script>,
     /// Host: game settings every player gets (`coop.option`); a friend's are ignored.
     pub options: Vec<(String, String)>,
+    /// The game's mods-info id, for Discord's Join button (from the launcher).
+    pub link_id: Option<String>,
     /// How long the host waits for a friend (None: until the window closes).
     pub host_wait: Option<Duration>,
     /// Testing: shift this PC's start date, to force a desync.
@@ -125,6 +127,8 @@ pub struct Session {
     game: Game,
     /// The game's file name without `.swf`, for Discord.
     swf_name: String,
+    /// The game's mods-info id, for Discord's Join button.
+    link_id: Option<String>,
     local_index: u8,
     names: Vec<String>,
     /// Connection number -> player slot of the session's players (see `from` in net events).
@@ -660,6 +664,7 @@ impl Session {
             stepper,
             game: opts.game.clone(),
             swf_name: opts.swf.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+            link_id: opts.link_id.clone(),
             local_index: your_index,
             peers,
             hosting,
@@ -1172,10 +1177,22 @@ impl Session {
     }
 
     /// What the window title shows.
-    /// What Discord shows: the game, then the room (or direct) and how many play.
-    pub fn presence(&self) -> (String, String) {
+    /// What Discord shows: the game, the room (or direct), how many play, and a Join button for
+    /// a relay room when the launcher said which game this is.
+    pub fn presence(&self) -> crate::coop::discord::Presence {
+        let playing = (0..self.names.len() as u8).filter(|&p| !self.lockstep.is_gone(p)).count() as u8;
         let where_ = self.room.as_ref().map_or("direct game".to_string(), |code| format!("room {code}"));
-        (format!("Playing {}", self.swf_name), format!("{where_}, {} players", self.names.len()))
+        let join = self
+            .room
+            .as_ref()
+            .zip(self.link_id.as_ref())
+            .and_then(|(code, id)| crate::coop::discord::join_link(id, code));
+        crate::coop::discord::Presence {
+            details: format!("Playing {}", self.swf_name),
+            state: where_,
+            party: Some((playing, self.names.len() as u8)),
+            join,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -1284,6 +1301,7 @@ mod tests {
             game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
             options: vec![],
+            link_id: None,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,

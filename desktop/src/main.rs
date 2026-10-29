@@ -253,6 +253,7 @@ fn main() -> Result<(), Error> {
             save_dir: Some(preferences.cli.save_directory.clone()),
             script,
             options: coop.options()?,
+            link_id: coop.coop_link_id.clone(),
             host_wait: None,
             start_skew_ms: 0,
             paced: true,
