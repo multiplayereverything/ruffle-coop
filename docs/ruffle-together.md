@@ -48,6 +48,13 @@ The relay needs the `ruffle-coop` game in mods-info first.
   During the game the window title shows the room code, your player number, and "waiting for…", "… left" or
   "OUT OF SYNC".
 - Everyone plays with the host's save (unlocked levels); nobody's own save changes.
+- **Typing:** names and chat typed in the game's own text boxes reach the game for everyone (any key, capitals,
+  Backspace, Enter, paste). While no text box is selected, only your mapped keys type.
+- **Pause:** Esc pauses or resumes the game for everyone ("Paused by Sam").
+- **Chat:** `/` opens a chat box; Enter sends, Esc closes. Your keys don't reach the game while it's open.
+- **Leaving:** a friend who leaves or drops out doesn't stop the game: everyone else plays on ("Sam left").
+  If the host leaves, the game ends.
+- `--coop-option NAME=VALUE` (host): a setting the game reads with `coop.option` (for mods that support it).
 - One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
@@ -76,6 +83,8 @@ local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=90,84 ALT=88,89
   PageUp/Down 33/34, End/Home 35/36, Insert/Delete 45/46, ; = , - . / ` [ \ ] ' 186-192 and 219-222.
 
 ## For game builders: the co-op API (AS2 and AS3)
+
+**The full reference, every call included, is [coop-api.md](coop-api.md).** The basics:
 
 A game made for Ruffle Together can ask about the players through `ExternalInterface`, the same way in AS2
 (`flash.external.ExternalInterface`) and AS3 (`flash.external.ExternalInterface`):
@@ -147,8 +156,9 @@ fall back to single-player answers (1 player, slot 0, no camera), so one SWF wor
 
 ## Known limits (v1)
 
-- Only the keys in the game's key map reach the game (P, M, Esc and the like don't, unless a map names them).
-- If anyone leaves, the session ends for everyone.
+- Only the keys in the game's key map reach the game as keys (P, M and the like don't, unless a map names
+  them); Esc pauses and `/` opens the chat unless the map gives them to the game.
+- If the host leaves, the session ends for everyone (a friend leaving doesn't end it).
 - During a session there is no menu, no fullscreen, and no opening another file; the stage keeps the game's
   own size (the window can still be resized).
 - Sounds end by the game's frame clock, not the PC's audio device: `onSoundComplete` / `soundComplete` and a
