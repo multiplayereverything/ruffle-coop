@@ -1583,7 +1583,13 @@ pub trait TDisplayObject<'gc>:
     #[no_dynamic]
     fn local_mouse_position(self, context: &UpdateContext<'gc>) -> Point<Twips> {
         let stage = context.stage;
-        let pixel_ratio = stage.view_matrix().a;
+        // Ruffle Together: every PC's window has its own size, so the mouse is rounded at the
+        // stage's own pixels, the same on every PC (a window-sized ratio moved _xmouse)
+        let pixel_ratio = if context.frame_clock_elapsed.is_some() {
+            1.0
+        } else {
+            stage.view_matrix().a
+        };
         let virtual_to_device = Matrix::scale(pixel_ratio, pixel_ratio);
 
         // Get mouse pos in global device pixels
@@ -3332,5 +3338,47 @@ impl<'gc> DisplayObjectWeak<'gc> {
             DisplayObjectWeak::LoaderDisplay(ld) => ld.upgrade(mc).map(|ld| ld.into()),
             DisplayObjectWeak::Bitmap(b) => b.upgrade(mc).map(|ld| ld.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod coop_tests {
+    use super::{DisplayObject, TDisplayObject};
+    use crate::frame_clock::FrameClock;
+    use crate::{PlayerBuilder, PlayerEvent};
+    use std::sync::{Arc, Mutex};
+
+    /// Where `_xmouse`/`_ymouse` put the same stage mouse (twips) in a window of this size.
+    fn stage_mouse(width: u32, height: u32, scale: f64, session: bool) -> (i32, i32) {
+        let swf = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/tests/swfs/avm1/external_interface/test.swf");
+        let player = PlayerBuilder::new()
+            .with_movie(crate::tag_utils::movie_from_path(swf, None).expect("test swf"))
+            .with_viewport_dimensions(width, height, scale)
+            .build();
+        let mut player = player.lock().expect("player");
+        if session {
+            player.set_frame_clock(Some(Arc::new(Mutex::new(FrameClock::new(0)))));
+        }
+        player.set_mouse_in_stage(true);
+        player.set_stage_mouse_override(Some((4001, 3999)));
+        player.handle_event(PlayerEvent::MouseMove { x: 0.0, y: 0.0 });
+        player.mutate_with_update_context(|context| {
+            let stage: DisplayObject<'_> = context.stage.into();
+            let point = stage.local_mouse_position(context);
+            (point.x.get(), point.y.get())
+        })
+    }
+
+    /// Ruffle Together: every PC's window has its own size, and the game must see the host's
+    /// mouse at the same spot on all of them.
+    #[test]
+    fn session_mouse_is_the_same_in_every_window_size() {
+        let windows = [(550, 400, 1.0), (1280, 720, 1.0), (550, 400, 1.5), (777, 333, 1.25)];
+        let session: Vec<_> = windows.iter().map(|&(w, h, s)| stage_mouse(w, h, s, true)).collect();
+        assert_eq!(session, vec![session[0]; windows.len()]);
+
+        // control: outside a session the mouse is rounded at the window's pixels, so it moves
+        let plain: Vec<_> = windows.iter().map(|&(w, h, s)| stage_mouse(w, h, s, false)).collect();
+        assert_ne!(plain, vec![plain[0]; windows.len()], "the test can't see the window size");
     }
 }

@@ -126,6 +126,8 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 - If anyone leaves, the session ends for everyone.
 - During a session there is no menu, no fullscreen, and no opening another file; the stage keeps the game's
   own size (the window can still be resized).
-- Games whose logic waits for a sound to finish, reads a sound's position, or loops over a Dictionary keyed by
-  objects may drift; the sync check warns if they do.
+- Sounds end by the game's frame clock, not the PC's audio device: `onSoundComplete` / `soundComplete` and a
+  sound's `position` are the same frame on every PC (and on a PC without sound). Timeline stream sounds still
+  follow the device. Games that loop over a Dictionary keyed by objects may drift; the sync check warns if they do.
+- `_xmouse` / `mouseX` are the same on every PC whatever the window's size (rounded at the stage's own pixels).
 - Network loads (URLLoader, Loader from the web) don't happen in a session.
