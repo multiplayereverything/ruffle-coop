@@ -1,10 +1,14 @@
 //! Save data for a session. Everyone plays with the host's save (same unlocked levels on every
-//! PC); writes stay in memory, so nobody's real save changes.
+//! PC). Every time the game saves, every PC writes all of the session's saves to its co-op save
+//! for this game (`<save dir>/coop/<game file>.save`), never to the solo save. The host starts
+//! from its co-op save, or from its solo save the first time.
 
 use ruffle_core::backend::storage::StorageBackend;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A save's name without the folder the game file is in ("localhost/<folder>/game.swf/so"
 /// becomes "game.swf/so"), so a friend who keeps the game somewhere else finds the host's save.
@@ -16,12 +20,70 @@ fn key(name: &str) -> String {
     }
 }
 
+/// This PC's co-op save for a game: one file holding all its saves, packed like `to_bytes`.
+pub fn coop_save_file(save_dir: &Path, swf_file_name: &str) -> PathBuf {
+    save_dir.join("coop").join(format!("{swf_file_name}.save"))
+}
+
 #[derive(Default)]
 pub struct SessionStorage {
     data: BTreeMap<String, Vec<u8>>,
+    /// The co-op save file; None writes nothing (tests, replays).
+    file: Option<PathBuf>,
+    /// Set once the games are out of sync: a broken game never overwrites a good save.
+    frozen: Arc<AtomicBool>,
+}
+
+/// Stops a session's co-op save from changing (once the games are out of sync).
+#[derive(Clone)]
+pub struct SaveGate(Arc<AtomicBool>);
+
+impl SaveGate {
+    pub fn freeze(&self) {
+        if !self.0.swap(true, Ordering::Relaxed) {
+            tracing::warn!("Ruffle Together: out of sync, so this game is no longer saved");
+        }
+    }
 }
 
 impl SessionStorage {
+    /// Also keeps everything the game saves in `file` (see `coop_save_file`).
+    pub fn with_coop_save(mut self, file: PathBuf) -> (Self, SaveGate) {
+        self.file = Some(file);
+        let gate = SaveGate(self.frozen.clone());
+        (self, gate)
+    }
+
+    /// The host's saves for this game: its co-op save, or its solo save if it has none yet.
+    pub fn export_for_session(save_dir: &Path, swf_file_name: &str) -> Vec<u8> {
+        match fs::read(coop_save_file(save_dir, swf_file_name)) {
+            Ok(bytes) if Self::from_bytes(&bytes).is_some() => bytes,
+            Ok(_) => {
+                tracing::warn!("Ruffle Together: the co-op save of {swf_file_name} is damaged; using the solo save");
+                Self::export_from_disk(save_dir, swf_file_name)
+            }
+            Err(_) => Self::export_from_disk(save_dir, swf_file_name),
+        }
+    }
+
+    /// Writes every save to the co-op save file: beside it first, then in its place, so a crash
+    /// mid-write keeps the old one.
+    fn write_coop_save(&self) {
+        let Some(file) = &self.file else { return };
+        if self.frozen.load(Ordering::Relaxed) {
+            return;
+        }
+        let temp = file.with_extension("save.tmp");
+        let result = file
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::write(&temp, self.to_bytes()))
+            .and_then(|()| fs::rename(&temp, file));
+        if let Err(e) = result {
+            tracing::warn!("Ruffle Together: couldn't save {}: {e}", file.display());
+        }
+    }
+
     /// Unpacks `to_bytes` output; None if it is cut short or malformed.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         fn take<'a>(bytes: &mut &'a [u8]) -> Option<&'a [u8]> {
@@ -37,7 +99,7 @@ impl SessionStorage {
             let value = take(&mut rest)?.to_vec();
             data.insert(key(&name), value);
         }
-        Some(Self { data })
+        Some(Self { data, ..Self::default() })
     }
 
     /// Each entry as [name length, name, value length, value], lengths as big-endian u32.
@@ -88,11 +150,13 @@ impl StorageBackend for SessionStorage {
 
     fn put(&mut self, name: &str, value: &[u8]) -> bool {
         self.data.insert(key(name), value.to_vec());
+        self.write_coop_save();
         true
     }
 
     fn remove_key(&mut self, name: &str) {
         self.data.remove(&key(name));
+        self.write_coop_save();
     }
 }
 
@@ -134,6 +198,57 @@ mod tests {
         storage.put("so_badicecream", &[9]);
         storage.remove_key("so_badicecream");
         assert_eq!(fs::read_dir(dir.path()).expect("read dir").count(), 0);
+    }
+
+    #[test]
+    fn what_the_game_saves_goes_to_the_coop_save_only() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let solo = dir.path().join("localhost").join("Game.swf");
+        fs::create_dir_all(&solo).expect("mkdir");
+        fs::write(solo.join("so.sol"), [1]).expect("write");
+        let bytes = SessionStorage::export_for_session(dir.path(), "Game.swf");
+        let (mut storage, _gate) = SessionStorage::from_bytes(&bytes)
+            .expect("valid bytes")
+            .with_coop_save(coop_save_file(dir.path(), "Game.swf"));
+        assert_eq!(storage.get("localhost/x/Game.swf/so"), Some(vec![1]), "starts from the solo save");
+        storage.put("localhost/x/Game.swf/so", &[2]);
+        // a save with no game file in its name (a SharedObject with localPath "/")
+        storage.put("localhost//top", &[3]);
+        assert_eq!(fs::read(solo.join("so.sol")).expect("solo save"), [1], "the solo save is untouched");
+
+        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf"))
+            .expect("valid bytes");
+        assert_eq!(next.get("localhost/y/Game.swf/so"), Some(vec![2]), "the next session continues");
+        assert_eq!(next.get("localhost//top"), Some(vec![3]));
+        assert!(SessionStorage::export_for_session(dir.path(), "Other.swf").is_empty());
+    }
+
+    #[test]
+    fn an_out_of_sync_game_is_not_saved() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = coop_save_file(dir.path(), "Game.swf");
+        let (mut storage, gate) = SessionStorage::default().with_coop_save(file.clone());
+        storage.put("Game.swf/so", &[1]);
+        gate.freeze();
+        storage.put("Game.swf/so", &[2]);
+        storage.remove_key("Game.swf/so");
+        let saved = SessionStorage::from_bytes(&fs::read(&file).expect("co-op save")).expect("valid");
+        assert_eq!(saved.get("Game.swf/so"), Some(vec![1]));
+        assert_eq!(storage.get("Game.swf/so"), None, "the game itself still sees its own writes");
+    }
+
+    #[test]
+    fn a_damaged_coop_save_falls_back_to_the_solo_save() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = coop_save_file(dir.path(), "Game.swf");
+        fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+        fs::write(&file, [0, 0, 0, 9]).expect("write");
+        let solo = dir.path().join("localhost").join("Game.swf");
+        fs::create_dir_all(&solo).expect("mkdir");
+        fs::write(solo.join("so.sol"), [4]).expect("write");
+        let storage = SessionStorage::from_bytes(&SessionStorage::export_for_session(dir.path(), "Game.swf"))
+            .expect("valid bytes");
+        assert_eq!(storage.get("Game.swf/so"), Some(vec![4]));
     }
 
     #[test]

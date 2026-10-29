@@ -7,7 +7,7 @@ use crate::coop::lockstep::{InputFrame, Lockstep};
 use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
-use crate::coop::storage::SessionStorage;
+use crate::coop::storage::{SaveGate, SessionStorage, coop_save_file};
 use anyhow::{Result, anyhow, bail};
 use ruffle_core::Player;
 use ruffle_core::events::PhysicalKey;
@@ -128,6 +128,8 @@ pub struct Session {
     room: Option<String>,
     clock: Arc<Mutex<FrameClock>>,
     storage: Option<SessionStorage>,
+    /// Freezes this PC's co-op save once the games are out of sync.
+    save_gate: Option<SaveGate>,
     script: Option<Script>,
     /// How many local inputs were sent (the next one is for frame `delay + local_sent`).
     local_sent: u32,
@@ -545,7 +547,7 @@ impl Session {
                 }
             }
             let save = match &opts.save_dir {
-                Some(dir) => SessionStorage::export_from_disk(
+                Some(dir) => SessionStorage::export_for_session(
                     dir,
                     &opts.swf.file_name().unwrap_or_default().to_string_lossy(),
                 ),
@@ -630,6 +632,15 @@ impl Session {
             .ok_or_else(|| anyhow!("the game started without you (the room is full)"))? as u8;
         let names = players.into_iter().map(|(_, name)| name).collect();
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
+        // every PC keeps what the game saves in its own co-op save for this game
+        let (storage, save_gate) = match &opts.save_dir {
+            Some(dir) => {
+                let file = coop_save_file(dir, &opts.swf.file_name().unwrap_or_default().to_string_lossy());
+                let (storage, gate) = storage.with_coop_save(file);
+                (storage, Some(gate))
+            }
+            None => (storage, None),
+        };
         tracing::info!(
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
             your_index + 1
@@ -652,6 +663,7 @@ impl Session {
             room,
             clock: Arc::new(Mutex::new(FrameClock::new(start_unix_ms + opts.start_skew_ms))),
             storage: Some(storage),
+            save_gate,
             script: opts.script,
             local_sent: 0,
             held: HashSet::new(),
@@ -912,6 +924,9 @@ impl Session {
         if differs && self.state.desync_at.is_none_or(|at| frame < at) {
             self.state.desync_at = Some(frame);
             tracing::error!("Ruffle Together: the games are out of sync at frame {frame}");
+            if let Some(gate) = &self.save_gate {
+                gate.freeze();
+            }
             self.write_desync_report(frame);
         }
     }
@@ -1038,6 +1053,8 @@ mod tests {
     use super::*;
     use crate::coop::replay::headless_player;
     use std::net::TcpListener;
+    use ruffle_core::backend::storage::StorageBackend;
+    use std::fs;
     use std::thread;
 
     fn free_port() -> u16 {
@@ -1156,6 +1173,56 @@ mod tests {
 
     /// Measured in the lab (tools/coop-lab/lab.py, relay with lag): a delay of d frames runs
     /// clean while the ping stays under 2d frames minus ~15 ms of jitter room.
+    /// Every PC keeps the session's saves in its own co-op save, the same bytes on each (each PC
+    /// keeps the game in a different folder), and the solo save is left alone.
+    #[test]
+    fn every_pc_keeps_the_same_coop_save() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let name = swf.file_name().expect("file name").to_string_lossy().to_string();
+        let dirs = [tempfile::tempdir().expect("temp dir"), tempfile::tempdir().expect("temp dir")];
+        let run = |mut o: SessionOpts, dir: PathBuf, folder: &'static str| {
+            o.save_dir = Some(dir);
+            let name = name.clone();
+            move || {
+                let swf = o.swf.clone();
+                let mut session = Session::start(o).expect("session");
+                let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+                let mut player = player.lock().expect("player");
+                while session.frame() < 300 && session.tick(&mut player).closed.is_none() {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                // what SharedObject.flush does, from where this PC keeps the game
+                player.storage_mut().put(&format!("localhost/{folder}/{name}/so_progress"), &[1, 2, 3]);
+                session.frame()
+            }
+        };
+        let host = thread::spawn(run(
+            opts(Role::HostDirect { port }, &swf, 0),
+            dirs[0].path().to_path_buf(),
+            "Users/host/games",
+        ));
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(run(
+            opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0),
+            dirs[1].path().to_path_buf(),
+            "Downloads",
+        ));
+        assert!(host.join().expect("host") >= 300 && join.join().expect("join") >= 300, "both played");
+        let saves: Vec<Vec<u8>> = dirs
+            .iter()
+            .map(|dir| fs::read(coop_save_file(dir.path(), &name)).expect("a co-op save on every PC"))
+            .collect();
+        assert_eq!(saves[0], saves[1], "the same save on both PCs");
+        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dirs[1].path(), &name))
+            .expect("valid save");
+        assert_eq!(next.get(&format!("localhost/elsewhere/{name}/so_progress")), Some(vec![1, 2, 3]), "a friend can host next");
+        for dir in &dirs {
+            let entries: Vec<_> = fs::read_dir(dir.path()).expect("read dir").flatten().map(|e| e.file_name()).collect();
+            assert_eq!(entries, vec![std::ffi::OsString::from("coop")], "no solo save was written");
+        }
+    }
+
     #[test]
     fn delay_is_picked_from_the_ping() {
         let frame = Duration::from_secs_f64(1.0 / 30.0);

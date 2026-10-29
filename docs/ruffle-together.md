@@ -48,7 +48,11 @@ The relay needs the `ruffle-coop` game in mods-info first.
   many the game needs, or why it can't start. Friends who join early wait as long as the last one takes.
   During the game the window title shows the room code, your player number, and "waiting for…", "… left" or
   "OUT OF SYNC".
-- Everyone plays with the host's save (unlocked levels); nobody's own save changes.
+- Saves: everyone starts from the host's co-op save for this game (its solo save the first time), so every PC
+  has the same unlocked levels. Whenever the game saves, every PC writes the session's saves to its own co-op
+  save, `%LOCALAPPDATA%\ruffle\SharedObjects\coop\<game file>.save` (under `--save-directory` if given), so any
+  player can host next time and carry on. Solo saves are never changed. Delete the file to start the co-op game
+  over. Once the games are OUT OF SYNC nothing more is saved.
 - One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
