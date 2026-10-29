@@ -1,0 +1,4 @@
+# Fireboy & Watergirl in the Forest Temple (2 players): Fireboy arrows, Watergirl W A D; P pauses (either player)
+slot 0: UP=38 LEFT=37 RIGHT=39 MENU=80
+slot 1: UP=87 LEFT=65 RIGHT=68 MENU=80
+local: UP=38,87 LEFT=37,65 RIGHT=39,68 MENU=80,27

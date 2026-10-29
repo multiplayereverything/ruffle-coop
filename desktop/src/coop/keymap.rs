@@ -30,6 +30,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("intrusion-2", include_str!("keys/intrusion-2.keys")),
     ("air-battle", include_str!("keys/air-battle.keys")),
     ("ultimate-crab-battle", include_str!("keys/ultimate-crab-battle.keys")),
+    ("fireboy-watergirl", include_str!("keys/fireboy-watergirl.keys")),
 ];
 
 /// A game's key map (`--coop-keys`).
@@ -595,6 +596,28 @@ mod tests {
             keys.events(slot, 0);
         }
         assert_eq!(button_named("MENU"), Some(MENU));
+    }
+
+    #[test]
+    fn fireboy_watergirl_keys() {
+        let fw = game("fireboy-watergirl");
+        assert_eq!(fw.max_players(), 2);
+        let mut keys = fw.keys();
+        let mut fireboy = down_keys(&keys.events(0, UP | LEFT | RIGHT));
+        fireboy.sort_by_key(|k| *k as u32);
+        let mut want = vec![PhysicalKey::ArrowUp, PhysicalKey::ArrowLeft, PhysicalKey::ArrowRight];
+        want.sort_by_key(|k| *k as u32);
+        assert_eq!(fireboy, want, "Fireboy is the arrows");
+        let mut watergirl = down_keys(&keys.events(1, UP | LEFT | RIGHT));
+        watergirl.sort_by_key(|k| *k as u32);
+        let mut want = vec![PhysicalKey::KeyW, PhysicalKey::KeyA, PhysicalKey::KeyD];
+        want.sort_by_key(|k| *k as u32);
+        assert_eq!(watergirl, want, "Watergirl is W A D");
+        assert_eq!(down_keys(&keys.events(0, MENU)), vec![PhysicalKey::KeyP], "P pauses");
+        // on their own PC each player may use either key set, and Esc pauses too
+        assert_eq!(fw.local_buttons(&held(&[PhysicalKey::KeyW])), UP);
+        assert_eq!(fw.local_buttons(&held(&[PhysicalKey::ArrowLeft])), LEFT);
+        assert_eq!(fw.local_buttons(&held(&[PhysicalKey::Escape])), MENU);
     }
 
     #[test]
