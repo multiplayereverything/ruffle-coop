@@ -129,6 +129,16 @@ pub struct CoopOpt {
     #[clap(long, default_value = "bad-ice-cream", help_heading = "Ruffle Together")]
     pub coop_keys: String,
 
+    /// Host: a game setting every player gets, as NAME=VALUE (repeat it for more); the game
+    /// reads it with coop.option("NAME"). Friends' own are ignored.
+    #[clap(long = "coop-option", value_name = "NAME=VALUE", help_heading = "Ruffle Together")]
+    pub coop_option: Vec<String>,
+
+    /// The game's id in mods-info (e.g. gm2), from the launcher: a relay host's Discord profile
+    /// then gets a Join button (ruffle-together://join/ID/CODE through the join page).
+    #[clap(long, value_name = "ID", help_heading = "Ruffle Together")]
+    pub coop_link_id: Option<String>,
+
     /// Your name, shown to the other players.
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]
     pub coop_name: String,
@@ -168,6 +178,19 @@ pub struct CoopOpt {
 }
 
 impl CoopOpt {
+    /// The host's game settings (`--coop-option NAME=VALUE`), in the order given.
+    pub fn options(&self) -> anyhow::Result<Vec<(String, String)>> {
+        self.coop_option
+            .iter()
+            .map(|option| {
+                let (name, value) = option
+                    .split_once('=')
+                    .ok_or_else(|| anyhow::anyhow!("--coop-option {option}: expected NAME=VALUE"))?;
+                Ok((name.trim().to_string(), value.to_string()))
+            })
+            .collect()
+    }
+
     /// The game named by --coop-keys.
     pub fn game(&self) -> anyhow::Result<keymap::Game> {
         keymap::Game::load(&self.coop_keys).map_err(|e| anyhow::anyhow!("--coop-keys: {e}"))

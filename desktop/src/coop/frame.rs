@@ -4,7 +4,7 @@
 
 use crate::coop::api::{CoopApi, CoopApiProvider};
 use crate::coop::keymap::{Game, GameKeys};
-use crate::coop::lockstep::InputFrame;
+use crate::coop::lockstep::{InputFrame, typed_event};
 use ruffle_core::events::MouseButton;
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::{FloatDuration, Player, PlayerEvent};
@@ -19,6 +19,17 @@ pub struct Stepper {
     game_keys: Option<String>,
     /// What the game can ask through ExternalInterface (every slot's mouse, the players).
     api: Arc<Mutex<CoopApi>>,
+    /// Who paused the game, while it is paused.
+    paused: Option<PausedBy>,
+    /// Each slot's PAUSE button last frame, to see a new press.
+    pause_held: [bool; crate::coop::lockstep::MAX_PLAYERS],
+}
+
+/// Who paused the game: a player (Esc), or the game itself (`coop.pause`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PausedBy {
+    Player(u8),
+    Game,
 }
 
 impl Stepper {
@@ -29,6 +40,8 @@ impl Stepper {
             loaded: false,
             game_keys: None,
             api: Arc::new(Mutex::new(CoopApi::new(players, local_slot))),
+            paused: None,
+            pause_held: [false; crate::coop::lockstep::MAX_PLAYERS],
         }
     }
 
@@ -47,6 +60,29 @@ impl Stepper {
             self.loaded = true;
             player.set_external_interface_provider(Some(Box::new(CoopApiProvider(self.api.clone()))));
         }
+        // a new PAUSE press by any player (the lowest slot first) pauses, or resumes, everyone
+        let mut pressed = None;
+        for (slot, input) in inputs.iter().enumerate().take(self.pause_held.len()) {
+            let held = input.buttons & crate::coop::lockstep::PAUSE != 0;
+            if held && !self.pause_held[slot] && pressed.is_none() {
+                pressed = Some(slot as u8);
+            }
+            self.pause_held[slot] = held;
+        }
+        if let Some(slot) = pressed {
+            if self.paused.is_some() {
+                self.resume(player);
+                self.add_event(format!("resume {slot}"));
+            } else {
+                self.pause(player, PausedBy::Player(slot));
+                self.add_event(format!("pause {slot}"));
+            }
+        }
+        if self.paused.is_some() {
+            // the game stands still: no input reaches it, no frame, no clock; the picture stays
+            player.render();
+            return;
+        }
         // the host's mouse is always in the stage, wherever this PC's own cursor is
         // every slot's mouse, for the game's ExternalInterface calls during this frame
         if let Ok(mut api) = self.api.lock() {
@@ -56,6 +92,10 @@ impl Stepper {
         for (slot, input) in inputs.iter().enumerate() {
             for event in self.keys.events(slot as u8, input.buttons) {
                 player.handle_event(event);
+            }
+            // what each player typed, in slot order: names, chat, keyPress buttons
+            for &c in input.text.chars() {
+                player.handle_event(typed_event(c));
             }
         }
         let mouse = inputs.first().and_then(|input| input.mouse);
@@ -93,6 +133,59 @@ impl Stepper {
         player.render();
     }
 
+    /// Something the game hears through `coop.events` ("join 1", "leave 2", "resume 0"...);
+    /// every PC adds the same on the same frame.
+    pub fn add_event(&mut self, event: String) {
+        if let Ok(mut api) = self.api.lock() {
+            api.add_event(event);
+        }
+    }
+
+    /// Who paused the game, while it is paused.
+    pub fn paused(&self) -> Option<PausedBy> {
+        self.paused
+    }
+
+    /// Stops the game for everyone: held keys are let go first (the game must not keep running
+    /// with a key down), and its sound stops.
+    fn pause(&mut self, player: &mut Player, by: PausedBy) {
+        for event in self.keys.release_all() {
+            player.handle_event(event);
+        }
+        player.audio_mut().pause();
+        self.paused = Some(by);
+        if let Ok(mut api) = self.api.lock() {
+            api.paused = true;
+        }
+    }
+
+    fn resume(&mut self, player: &mut Player) {
+        player.audio_mut().play();
+        self.paused = None;
+        if let Ok(mut api) = self.api.lock() {
+            api.paused = false;
+        }
+    }
+
+    /// Whether the game reads `coop.typed` (every typed character is wanted then).
+    pub fn wants_text(&self) -> bool {
+        self.api.lock().is_ok_and(|api| api.wants_text())
+    }
+
+    /// This PC's round trip to each player, for `coop.ping`.
+    pub fn set_pings(&mut self, pings: [Option<u32>; crate::coop::lockstep::MAX_PLAYERS]) {
+        if let Ok(mut api) = self.api.lock() {
+            api.pings = pings;
+        }
+    }
+
+    /// The host's game settings, for `coop.option`.
+    pub fn set_options(&mut self, options: &[(String, String)]) {
+        if let Ok(mut api) = self.api.lock() {
+            api.options = options.to_vec();
+        }
+    }
+
     /// Every player's name, for `coop.name`.
     pub fn set_names(&mut self, names: &[String]) {
         if let Ok(mut api) = self.api.lock() {
@@ -123,6 +216,11 @@ impl Stepper {
             self.keys = game.keys();
         }
         player.set_coop_camera(api.local_camera().map(|c| (c.x, c.y, c.zoom)));
+        let pause = std::mem::take(&mut api.pause_asked);
+        drop(api);
+        if pause && self.paused.is_none() {
+            self.pause(player, PausedBy::Game);
+        }
     }
 
     /// Lets go of every key, e.g. when the session ends.
@@ -153,7 +251,7 @@ mod tests {
         let frame = Duration::from_secs_f64(1.0 / player.frame_rate());
 
         let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
-        let inputs = [InputFrame { buttons: UP, mouse: Some((200, 400, true)) }, InputFrame::default()];
+        let inputs = [InputFrame { buttons: UP, mouse: Some((200, 400, true)), ..Default::default() }, InputFrame::default()];
         stepper.step(&mut player, &inputs);
         stepper.step(&mut player, &inputs);
 
@@ -170,7 +268,7 @@ mod tests {
             let mut player = player.lock().expect("player");
             player.set_mouse_in_stage(false); // this PC's own cursor is outside its window
             let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
-            let inputs = [InputFrame { buttons: 0, mouse: Some((4001, 3999, false)) }];
+            let inputs = [InputFrame { buttons: 0, mouse: Some((4001, 3999, false)), ..Default::default() }];
             stepper.step(&mut player, &inputs);
             assert!(player.mouse_in_stage(), "the host's mouse is always in the stage");
             spots.push(player.mouse_position_twips());
@@ -275,6 +373,75 @@ mod tests {
         assert!(player.preload(&mut ruffle_core::limits::ExecutionLimit::exhausted()));
     }
 
+    /// Ruffle's own AS2 text-input test: a selected text box, traced on Escape. Two players type
+    /// into it (in slot order, on the same frame), Backspace included, then Escape shows it.
+    #[test]
+    fn every_players_typing_reaches_the_selected_text_box() {
+        use crate::coop::lockstep::{Typed, text_control_char};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/tests/swfs");
+        let movie =
+            ruffle_core::tag_utils::movie_from_path(root.join("avm1/edittext_input/test.swf"), None).expect("test swf");
+        let traces = Arc::new(Mutex::new(vec![]));
+        let player = PlayerBuilder::new()
+            .with_movie(movie)
+            .with_log(Traces(traces.clone()))
+            .with_autoplay(true)
+            .build();
+        let mut player = player.lock().expect("player");
+        let escape = Game::parse("t", "slot 0: FIRE=27\nslot 1: FIRE=27").expect("map").keys();
+        let mut stepper = Stepper::new(escape, 2, 0);
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
+        assert!(player.coop_text_box_focused(), "the SWF selects its text box");
+        let typed = |text: &str| InputFrame { text: Typed::from_chars(text.chars()), ..Default::default() };
+        let backspace = Typed::from_chars([text_control_char(ruffle_core::events::TextControlCode::Backspace)]);
+        stepper.step(&mut player, &[typed("Lia"), typed("xm")]);
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame { text: backspace, ..Default::default() }]);
+        stepper.step(&mut player, &[typed("!"), InputFrame::default()]);
+        stepper.step(&mut player, &[InputFrame { buttons: FIRE, ..Default::default() }, InputFrame::default()]);
+        assert_eq!(traces.lock().expect("traces").last().map(String::as_str), Some("Liax!"));
+    }
+
+    /// Any player's PAUSE press stops the game for everyone (no frame, no clock) until a PAUSE
+    /// press resumes it; the game then carries on exactly where it stopped. The game's own
+    /// `coop.pause` stops it too.
+    #[test]
+    fn pause_stops_the_game_and_resume_carries_on() {
+        use crate::coop::lockstep::PAUSE;
+        let Some((paused, mut paused_stepper)) = bic(0) else {
+            eprintln!("skipping: COOP_TEST_SWF not set");
+            return;
+        };
+        let (plain, mut plain_stepper) = bic(0).expect("player");
+        let (mut paused, mut plain) = (paused.lock().expect("lock"), plain.lock().expect("lock"));
+        let idle = [InputFrame::default(), InputFrame::default()];
+        let pause_by_friend = [InputFrame::default(), InputFrame { buttons: PAUSE, ..Default::default() }];
+        for _ in 0..30 {
+            paused_stepper.step(&mut paused, &idle);
+            plain_stepper.step(&mut plain, &idle);
+        }
+        let before = paused.coop_fingerprint();
+        paused_stepper.step(&mut paused, &pause_by_friend);
+        assert_eq!(paused_stepper.paused(), Some(PausedBy::Player(1)));
+        for _ in 0..20 {
+            paused_stepper.step(&mut paused, &pause_by_friend); // held: no new press
+            assert_eq!(paused.coop_fingerprint(), before, "nothing moves, the clock included");
+        }
+        paused_stepper.step(&mut paused, &idle); // let go
+        paused_stepper.step(&mut paused, &pause_by_friend); // a new press resumes
+        assert_eq!(paused_stepper.paused(), None);
+        // the resume frame already runs the game's next frame
+        plain_stepper.step(&mut plain, &idle);
+        for _ in 0..40 {
+            paused_stepper.step(&mut paused, &idle);
+            plain_stepper.step(&mut plain, &idle);
+        }
+        assert_eq!(paused.coop_fingerprint(), plain.coop_fingerprint(), "the same game, just later");
+
+        paused_stepper.api().lock().expect("api").answer("coop.pause", &[]);
+        paused_stepper.apply_game_calls(&mut paused);
+        assert_eq!(paused_stepper.paused(), Some(PausedBy::Game));
+    }
+
     /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.
     fn bic(local_slot: u8) -> Option<(Arc<Mutex<Player>>, Stepper)> {
         let swf = std::env::var("COOP_TEST_SWF").ok()?;
@@ -318,7 +485,7 @@ mod tests {
         set_cameras(&friend_stepper, cameras);
         let (mut host, mut friend, mut plain) =
             (host.lock().expect("lock"), friend.lock().expect("lock"), plain.lock().expect("lock"));
-        let inputs = [InputFrame { buttons: UP, mouse: None }, InputFrame::default()];
+        let inputs = [InputFrame { buttons: UP, mouse: None, ..Default::default() }, InputFrame::default()];
         for frame in 0..120 {
             host_stepper.step(&mut host, &inputs);
             friend_stepper.step(&mut friend, &inputs);
@@ -377,7 +544,7 @@ mod tests {
             assert_eq!(answer, Value::Bool(true));
         };
         give(&stepper);
-        let fire = [InputFrame { buttons: FIRE, mouse: None }, InputFrame::default()];
+        let fire = [InputFrame { buttons: FIRE, mouse: None, ..Default::default() }, InputFrame::default()];
         stepper.step(&mut player, &fire); // the switch happens at the end of this frame
         assert_eq!(stepper.game_keys.as_deref(), Some(map));
         // the new map: slot 0's FIRE is A now (it was Space), and nothing is held yet

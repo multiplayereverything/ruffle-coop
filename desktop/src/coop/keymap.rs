@@ -161,8 +161,28 @@ impl Game {
     }
 
     /// This PC's buttons from the keys held right now.
+    /// Whether this PC's keys include the key with this Flash key code.
+    pub fn has_local_code(&self, code: u32) -> bool {
+        self.local.iter().any(|(local, _)| *local == code)
+    }
+
+    /// Whether one of this PC's mapped keys types `c` (a letter, digit or space).
+    pub fn has_local_char(&self, c: char) -> bool {
+        let code = match c {
+            'a'..='z' => c.to_ascii_uppercase() as u32,
+            'A'..='Z' | '0'..='9' | ' ' => c as u32,
+            _ => return false,
+        };
+        self.local.iter().any(|(local, _)| *local == code)
+    }
+
     pub fn local_buttons(&self, held: &HashSet<PhysicalKey>) -> u16 {
-        let mut buttons = 0;
+        // Esc pauses, unless the map gives it to the game
+        let mut buttons = if held.contains(&PhysicalKey::Escape) && !self.local.iter().any(|(code, _)| *code == 27) {
+            crate::coop::lockstep::PAUSE
+        } else {
+            0
+        };
         for &key in held {
             let pressed = KeyDescriptor { physical_key: key, logical_key: LogicalKey::Unknown, key_location: KeyLocation::Standard };
             if let (Some(code), _) = ruffle_core::coop_key_codes(pressed) {
@@ -264,10 +284,6 @@ impl GameKeys {
             let (was, is) = (before & game_key.button != 0, buttons & game_key.button != 0);
             if is && !was {
                 events.push(PlayerEvent::KeyDown { key: game_key.key });
-                // a real keyboard also types the character: on(keyPress "1") and text fields hear it
-                if let LogicalKey::Character(codepoint) = game_key.key.logical_key {
-                    events.push(PlayerEvent::TextInput { codepoint });
-                }
             } else if was && !is {
                 events.push(PlayerEvent::KeyUp { key: game_key.key });
             }
@@ -554,34 +570,31 @@ mod tests {
         }
     }
 
-    /// AS2 buttons' on(keyPress "1") and text fields hear the typed character, not the key: a
-    /// key press also types its character, as a real keyboard does. Named keys (arrows, Enter)
-    /// type nothing; buttons match those from the key itself.
+    /// Keys don't type: what a player types travels on its own (`InputFrame::text`), or a real
+    /// keyboard would type every mapped key twice. Which characters this PC's own keys type
+    /// decides what may travel while no text box is selected.
     #[test]
-    fn a_key_press_types_its_character() {
-        let typed = |events: &[PlayerEvent]| -> Vec<char> {
-            events
-                .iter()
-                .filter_map(|e| match e {
-                    PlayerEvent::TextInput { codepoint } => Some(*codepoint),
-                    _ => None,
-                })
-                .collect()
-        };
+    fn keys_dont_type_and_which_characters_this_pcs_keys_type() {
         let mut keys = game("ultimate-crab-battle").keys();
-        let events = keys.events(0, KEY1);
-        assert_eq!(typed(&events), vec!['1']);
-        let down = events.iter().position(|e| matches!(e, PlayerEvent::KeyDown { .. }));
-        let text = events.iter().position(|e| matches!(e, PlayerEvent::TextInput { .. }));
-        assert!(down < text, "the key goes down before its character, as from winit");
-        assert!(typed(&keys.events(0, KEY1)).is_empty(), "held: typed once");
-        assert!(typed(&keys.events(0, 0)).is_empty(), "a release types nothing");
-        assert_eq!(typed(&keys.events(1, FIRE)), vec!['u']);
-        assert!(typed(&keys.events(0, UP | ALT)).is_empty(), "arrows and Ctrl type nothing");
-        // shared keys type once, when the first player presses them
-        let mut keys = game("territory-war").keys();
-        assert_eq!(typed(&keys.events(0, KEY1)), vec!['1']);
-        assert!(typed(&keys.events(1, KEY1)).is_empty());
+        let events = keys.events(0, KEY1 | FIRE);
+        assert!(!events.iter().any(|e| matches!(e, PlayerEvent::TextInput { .. })), "{events:?}");
+        let gm2 = game("gun-mayhem-2");
+        for (c, mapped) in [('z', true), ('Z', true), ('t', true), ('w', true), ('p', false), ('1', false), ('!', false)] {
+            assert_eq!(gm2.has_local_char(c), mapped, "{c}");
+        }
+        assert!(game("ultimate-crab-battle").has_local_char('1'));
+        assert!(game("bad-ice-cream").has_local_char(' '));
+    }
+
+    /// Esc pauses (every map), unless the map gives Esc to the game.
+    #[test]
+    fn esc_pauses_unless_the_game_has_it() {
+        use crate::coop::lockstep::PAUSE;
+        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape])), PAUSE);
+        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape, PhysicalKey::KeyZ])), PAUSE | FIRE);
+        let esc_is_fire = Game::parse("t", "slot 0: FIRE=27
+local: FIRE=27").expect("map");
+        assert_eq!(esc_is_fire.local_buttons(&held(&[PhysicalKey::Escape])), FIRE);
     }
 
     /// Stealth Hunter 2's cutscenes skip with Esc: MENU presses it, for every player.

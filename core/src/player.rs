@@ -993,6 +993,18 @@ impl Player {
         (point.x.get(), point.y.get())
     }
 
+    /// Ruffle Together: whether the game has a text box the player can type in selected (the
+    /// same on every PC, as it is game state).
+    pub fn coop_text_box_focused(&mut self) -> bool {
+        self.mutate_with_update_context(|context| {
+            context
+                .stage
+                .focus_tracker()
+                .get_as_edit_text()
+                .is_some_and(|text| text.is_editable())
+        })
+    }
+
     /// Ruffle Together: this PC's camera, showing the stage point (x, y) (stage pixels) at the
     /// middle of the screen `zoom` times bigger; None shows the stage as it is.
     pub fn set_coop_camera(&mut self, camera: Option<(f64, f64, f64)>) {

@@ -1,5 +1,6 @@
 /**
  * Ruffle Together co-op API for AS2 games (any SWF version, including 6 and 7).
+ * Full reference: docs/coop-api.md in the ruffle-coop repository.
  *
  * Every call is safe outside Ruffle Together (plain Flash Player or plain Ruffle): active() is false,
  * players() is 1, localSlot() is 0, mouse calls read the normal mouse, and camera, HUD, label and
@@ -74,4 +75,37 @@ class RuffleTogether {
 
     /** The game's own key map, in the .keys format ("slot 0: UP=38 FIRE=32\n..."). */
     public static function keys(text:String):Boolean { return send("coop.keys", text) == true; }
+
+    /** That player's held buttons as bits (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ALT 32, KEY1 64, ...). */
+    public static function buttons(slot:Number):Number { return active() ? Number(send("coop.buttons", slot)) : 0; }
+
+    /** True while that player holds the button ("UP", "FIRE", "KEY1", ...). */
+    public static function button(slot:Number, name:String):Boolean { return send("coop.button", slot, name) == true; }
+
+    /** What that player typed this frame ("\b" = Backspace, "\n" = Enter). */
+    public static function typed(slot:Number):String {
+        var t = send("coop.typed", slot);
+        return t == undefined ? "" : String(t);
+    }
+
+    /** The host's setting (--coop-option NAME=VALUE), or undefined. */
+    public static function option(name:String) { return send("coop.option", name); }
+
+    /** Every host setting, as an object (empty outside a session). */
+    public static function options():Object {
+        var o = send("coop.options");
+        return o == undefined ? {} : o;
+    }
+
+    /** This PC's round trip to that player in ms (display only); undefined until measured. */
+    public static function ping(slot:Number) { return send("coop.ping", slot); }
+
+    /** Pauses the game for everyone (any player's Esc resumes). */
+    public static function pause():Boolean { return send("coop.pause") == true; }
+
+    /** What happened since the last call: ["join 0", "leave 2", "pause 1", "resume 1", "chat 1 gg", ...]. */
+    public static function events():Array {
+        var e = send("coop.events");
+        return e == undefined ? [] : e;
+    }
 }

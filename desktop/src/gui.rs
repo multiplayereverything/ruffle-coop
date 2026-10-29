@@ -105,8 +105,22 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let labels = crate::coop::session().map(|session| session.labels()).unwrap_or_default();
+            let (labels, paused, notice, chat) = crate::coop::session()
+                .map(|session| (session.labels(), session.paused_text(), session.notice(), session.chat_view()))
+                .unwrap_or_default();
+            show_chat(egui_ctx, &chat.0, chat.1.as_deref());
             show_labels(egui_ctx, player, &labels, menu_height_offset);
+            if let Some(paused) = paused {
+                show_paused(egui_ctx, &paused);
+            }
+            if let Some(notice) = notice {
+                Area::new(Id::new("coop-notice"))
+                    .anchor(Align2::CENTER_TOP, vec2(0.0, 40.0))
+                    .order(Order::Foreground)
+                    .show(egui_ctx, |ui| {
+                        Frame::popup(ui.style()).show(ui, |ui| ui.label(RichText::new(notice).size(16.0)));
+                    });
+            }
         }
 
         if let Some(player) = player {
@@ -212,6 +226,45 @@ fn show_labels(
         painter.text(at + vec2(1.0, 1.0), Align2::CENTER_BOTTOM, &label.text, font.clone(), Color32::BLACK);
         painter.text(at, Align2::CENTER_BOTTOM, &label.text, font, Color32::WHITE);
     }
+}
+
+/// Ruffle Together: recent chat lines bottom left, and the chat box while it's open ("/" opens it,
+/// Enter sends, Esc closes).
+fn show_chat(egui_ctx: &egui::Context, lines: &[String], chat_box: Option<&str>) {
+    if lines.is_empty() && chat_box.is_none() {
+        return;
+    }
+    Area::new(Id::new("coop-chat"))
+        .anchor(Align2::LEFT_BOTTOM, vec2(8.0, -8.0))
+        .order(Order::Foreground)
+        .interactable(false)
+        .show(egui_ctx, |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_max_width(420.0);
+                for line in lines {
+                    ui.label(line);
+                }
+                if let Some(text) = chat_box {
+                    ui.label(RichText::new(format!("> {text}_")).strong());
+                    ui.label(RichText::new("Enter to send, Esc to close").small());
+                }
+            });
+        });
+}
+
+/// Ruffle Together: who paused the game, over it, until someone presses Esc.
+fn show_paused(egui_ctx: &egui::Context, paused: &str) {
+    Area::new(Id::new("coop-paused"))
+        .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .order(Order::Foreground)
+        .show(egui_ctx, |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new(paused).size(22.0).strong());
+                    ui.label("Press Esc to resume");
+                });
+            });
+        });
 }
 
 /// Ruffle Together: the window's waiting screen until everyone has joined the session.

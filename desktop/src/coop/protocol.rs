@@ -1,7 +1,7 @@
 //! Messages between Ruffle Together players: one text line each, `|`-separated, so they fit the
 //! relay's star rooms (NUL-framed lines) as well as direct connections.
 
-use crate::coop::lockstep::InputFrame;
+use crate::coop::lockstep::{InputFrame, Typed};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Msg {
@@ -24,6 +24,8 @@ pub enum Msg {
         save: Vec<u8>,
         /// Every player in slot order (the host first): their Hello id and name.
         players: Vec<(u64, String)>,
+        /// The host's game settings (`coop.option`).
+        options: Vec<(String, String)>,
     },
     Input {
         player: u8,
@@ -44,6 +46,13 @@ pub enum Msg {
     /// Host to everyone before the start, every couple of seconds: who has joined so far (the host
     /// first) and how many the game starts with. It also tells a waiting friend the host is there.
     Lobby { needed: u8, players: Vec<String> },
+    /// Host to everyone, every few seconds: each player's round trip to the host, in ms (slot
+    /// order; None until measured), for `coop.ping`.
+    Pings { ms: Vec<Option<u32>> },
+    /// Host to everyone: `player` left; from `frame` on they hold nothing (every PC the same).
+    Left { player: u8, frame: u32 },
+    /// A chat line, heard by every game on `frame` (sent just before that frame's input).
+    Chat { player: u8, frame: u32, text: String },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -74,24 +83,36 @@ pub fn encode(msg: &Msg) -> String {
             frame_rate_milli,
             save,
             players,
+            options,
         } => {
             let hex: String = save.iter().map(|b| format!("{b:02x}")).collect();
+            let options: String = options
+                .iter()
+                .map(|(name, value)| format!("{name}={value}\n"))
+                .collect::<String>()
+                .bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             let players: Vec<String> = players
                 .iter()
                 .map(|(id, name)| format!("{id:x}:{}", clean(name).replace(',', " ")))
                 .collect();
-            format!("ST|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}|{}", players.join(","))
+            format!("ST|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}|{}|{options}", players.join(","))
         }
         Msg::Input {
             player,
             frame,
             input,
-        } => match input.mouse {
-            Some((x, y, down)) => {
-                format!("IN|{player}|{frame}|{}|{x}|{y}|{}", input.buttons, down as u8)
+        } => {
+            let text: String = input.text.chars().iter().collect();
+            let text: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+            match input.mouse {
+                Some((x, y, down)) => {
+                    format!("IN|{player}|{frame}|{}|{x}|{y}|{}|{text}", input.buttons, down as u8)
+                }
+                None => format!("IN|{player}|{frame}|{}|-|-|-|{text}", input.buttons),
             }
-            None => format!("IN|{player}|{frame}|{}|-|-|-", input.buttons),
-        },
+        }
         Msg::Print {
             player,
             frame,
@@ -106,7 +127,23 @@ pub fn encode(msg: &Msg) -> String {
             let players: Vec<String> = players.iter().map(|name| clean(name).replace(',', " ")).collect();
             format!("LB|{needed}|{}", players.join(","))
         }
+        Msg::Left { player, frame } => format!("LF|{player}|{frame}"),
+        Msg::Chat { player, frame, text } => {
+            let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+            format!("CH|{player}|{frame}|{hex}")
+        }
+        Msg::Pings { ms } => {
+            let ms: Vec<String> = ms.iter().map(|ms| ms.map_or("-".into(), |ms| ms.to_string())).collect();
+            format!("PG|{}", ms.join(","))
+        }
     }
+}
+
+fn unhex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
 }
 
 pub fn decode(line: &str) -> Result<Msg, String> {
@@ -135,7 +172,7 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             })
         }
         "ST" => {
-            want(6)?;
+            want(7)?;
             let hex = parts[4];
             if !hex.len().is_multiple_of(2) {
                 return Err(bad());
@@ -154,16 +191,33 @@ pub fn decode(line: &str) -> Result<Msg, String> {
                 .collect::<Option<Vec<_>>>()
                 .filter(|players| (1..=crate::coop::lockstep::MAX_PLAYERS).contains(&players.len()))
                 .ok_or_else(bad)?;
+            let options = unhex(parts[6]).ok_or_else(bad)?;
+            let options = String::from_utf8(options).map_err(|_| bad())?;
+            let options = options
+                .lines()
+                .map(|line| line.split_once('=').map(|(n, v)| (n.to_string(), v.to_string())))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(bad)?;
             Ok(Msg::Start {
                 delay: uint(1)?,
                 start_unix_ms: num(2)?,
                 frame_rate_milli: uint(3)?,
                 save,
                 players,
+                options,
             })
         }
         "IN" => {
-            want(7)?;
+            want(8)?;
+            let hex = parts[7];
+            let bytes = (0..hex.len() / 2)
+                .map(|i| u8::from_str_radix(hex.get(i * 2..i * 2 + 2).unwrap_or("zz"), 16))
+                .collect::<Result<Vec<u8>, _>>()
+                .map_err(|_| bad())?;
+            let text = String::from_utf8(bytes).map_err(|_| bad())?;
+            if hex.len() % 2 != 0 || text.chars().count() > Typed::MAX {
+                return Err(bad());
+            }
             let buttons = u16::try_from(num(3)?).map_err(|_| bad())?;
             let mouse = if parts[4] == "-" {
                 None
@@ -175,7 +229,7 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             Ok(Msg::Input {
                 player: byte(1)?,
                 frame: uint(2)?,
-                input: InputFrame { buttons, mouse },
+                input: InputFrame { buttons, mouse, text: Typed::from_chars(text.chars()) },
             })
         }
         "FP" => {
@@ -207,6 +261,25 @@ pub fn decode(line: &str) -> Result<Msg, String> {
         "PO" => {
             want(2)?;
             Ok(Msg::Pong { seq: uint(1)? })
+        }
+        "CH" => {
+            want(4)?;
+            let text = String::from_utf8(unhex(parts[3]).ok_or_else(bad)?).map_err(|_| bad())?;
+            Ok(Msg::Chat { player: byte(1)?, frame: uint(2)?, text })
+        }
+        "LF" => {
+            want(3)?;
+            Ok(Msg::Left { player: byte(1)?, frame: uint(2)? })
+        }
+        "PG" => {
+            want(2)?;
+            let ms = parts[1]
+                .split(',')
+                .map(|ms| if ms == "-" { Some(None) } else { ms.parse().ok().map(Some) })
+                .collect::<Option<Vec<_>>>()
+                .filter(|ms| ms.len() <= crate::coop::lockstep::MAX_PLAYERS)
+                .ok_or_else(bad)?;
+            Ok(Msg::Pings { ms })
         }
         "AL" => {
             want(3)?;
@@ -256,6 +329,7 @@ mod tests {
             frame_rate_milli: 25_000,
             save: vec![0, 1, 254, 255],
             players: vec![(0, "Liam".into()), (77, "Sam".into())],
+            options: vec![("map".into(), "3".into()), ("note".into(), "a|b=c,d".into())],
         });
         roundtrip(Msg::Start {
             delay: 0,
@@ -263,6 +337,7 @@ mod tests {
             frame_rate_milli: 30_000,
             save: vec![],
             players: vec![(0, String::new()), (1, "a:b".into()), (2, "c".into()), (3, "d".into())],
+            options: vec![],
         });
         roundtrip(Msg::Input {
             player: 1,
@@ -270,6 +345,7 @@ mod tests {
             input: InputFrame {
                 buttons: UP | FIRE,
                 mouse: None,
+                text: Typed::from_chars("Li|am\u{E014}é".chars()),
             },
         });
         roundtrip(Msg::Input {
@@ -278,8 +354,12 @@ mod tests {
             input: InputFrame {
                 buttons: 0,
                 mouse: Some((-20, 11000, true)),
+                ..Default::default()
             },
         });
+        roundtrip(Msg::Left { player: 2, frame: 1234 });
+        roundtrip(Msg::Chat { player: 1, frame: 99, text: "gg | well played, été!".into() });
+        roundtrip(Msg::Pings { ms: vec![Some(0), Some(162), None, Some(4000)] });
         roundtrip(Msg::Print {
             player: 1,
             frame: 25,
@@ -339,6 +419,7 @@ mod tests {
             frame_rate_milli: 0,
             save: vec![],
             players: vec![(0, "x,y".into())],
+            options: vec![],
         });
         assert!(matches!(decode(&line), Ok(Msg::Start { players, .. }) if players == vec![(0, "x y".into())]));
     }

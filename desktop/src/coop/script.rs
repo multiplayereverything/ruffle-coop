@@ -8,9 +8,11 @@
 //! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
 //! move 100 50     host mouse moves (no click)
 //! move 100 50 2   player 2's mouse (any of click/move; the host's when left out)
+//! type 1 Sam{Enter}  player 1 types "Sam" then Enter (8 characters a frame; {Backspace} too)
 //! ```
 
-use crate::coop::lockstep::{InputFrame, MAX_PLAYERS, button_named};
+use crate::coop::lockstep::{InputFrame, MAX_PLAYERS, Typed, button_named, text_control_char};
+use ruffle_core::events::TextControlCode;
 
 pub struct Script {
     frames: Vec<[InputFrame; MAX_PLAYERS]>,
@@ -51,6 +53,33 @@ impl Script {
                     }
                     now[slot].mouse = Some((x, y, false));
                 }
+                "type" => {
+                    let slot = int(1)? as usize;
+                    if slot >= MAX_PLAYERS {
+                        return Err(fail("unknown player"));
+                    }
+                    // the rest of the line after "type N ", spaces included
+                    let text = line.splitn(3, ' ').nth(2).ok_or_else(|| fail("expected text"))?;
+                    let mut chars = vec![];
+                    let mut rest = text;
+                    while let Some(c) = rest.chars().next() {
+                        let named = [("{Enter}", TextControlCode::Enter), ("{Backspace}", TextControlCode::Backspace)]
+                            .into_iter()
+                            .find(|(name, _)| rest.starts_with(name));
+                        if let Some((name, code)) = named {
+                            chars.push(text_control_char(code));
+                            rest = &rest[name.len()..];
+                        } else {
+                            chars.push(c);
+                            rest = &rest[c.len_utf8()..];
+                        }
+                    }
+                    for chunk in chars.chunks(Typed::MAX) {
+                        let mut frame = now;
+                        frame[slot].text = Typed::from_chars(chunk.iter().copied());
+                        frames.push(frame);
+                    }
+                }
                 word if word.starts_with('p') => {
                     let player: usize = word[1..]
                         .parse()
@@ -88,6 +117,18 @@ impl Script {
 mod tests {
     use super::*;
     use crate::coop::lockstep::{FIRE, KEY1, LEFT, NO, UP, VIEW};
+
+    #[test]
+    fn type_types_text_once_eight_characters_a_frame() {
+        let script = Script::parse("p0 UP\ntype 1 Sam Smith!{Enter}\nwait 1").expect("parses");
+        assert_eq!(script.len(), 3, "10 characters + Enter: two frames, then the wait");
+        let typed: String = (0..2).flat_map(|f| script.input(f, 1).text.chars().to_vec()).collect();
+        assert_eq!(typed, format!("Sam Smith!{}", text_control_char(TextControlCode::Enter)));
+        assert_eq!(script.input(0, 0).buttons, UP, "held buttons go on");
+        assert!(script.input(2, 1).text.chars().is_empty(), "typed once, not held");
+        assert!(Script::parse("type 9 x").is_err());
+        assert!(Script::parse("type 1").is_err());
+    }
 
     #[test]
     fn wait_repeats_current_buttons() {

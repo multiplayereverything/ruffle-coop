@@ -3,7 +3,7 @@
 
 use crate::coop::frame::Stepper;
 use crate::coop::keymap::Game;
-use crate::coop::lockstep::{InputFrame, Lockstep};
+use crate::coop::lockstep::{InputFrame, Lockstep, Typed};
 use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
@@ -13,7 +13,7 @@ use ruffle_core::Player;
 use ruffle_core::events::PhysicalKey;
 use ruffle_core::frame_clock::FrameClock;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -40,6 +40,12 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 const LOBBY_EVERY: Duration = Duration::from_secs(2);
 /// A friend that hears nothing at all from the host for this long before the start gives up.
 const HOST_SILENT: Duration = if cfg!(test) { Duration::from_secs(5) } else { Duration::from_secs(30) };
+/// The longest chat line.
+const CHAT_MAX: usize = 120;
+/// How long a chat line stays on screen.
+const CHAT_SHOWN: Duration = Duration::from_secs(12);
+/// How often the host measures every friend's round trip (`coop.ping`).
+const PING_EVERY: Duration = Duration::from_secs(2);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
 pub const VERSION: &str = "1.0.3.6";
@@ -65,6 +71,10 @@ pub struct SessionOpts {
     pub save_start: SaveStart,
     /// Testing: input from a script instead of the keyboard and mouse.
     pub script: Option<Script>,
+    /// Host: game settings every player gets (`coop.option`); a friend's are ignored.
+    pub options: Vec<(String, String)>,
+    /// The game's mods-info id, for Discord's Join button (from the launcher).
+    pub link_id: Option<String>,
     /// How long the host waits for a friend (None: until the window closes).
     pub host_wait: Option<Duration>,
     /// Testing: shift this PC's start date, to force a desync.
@@ -124,6 +134,8 @@ pub struct Session {
     game: Game,
     /// The game's file name without `.swf`, for Discord.
     swf_name: String,
+    /// The game's mods-info id, for Discord's Join button.
+    link_id: Option<String>,
     local_index: u8,
     names: Vec<String>,
     /// Connection number -> player slot of the session's players (see `from` in net events).
@@ -140,6 +152,8 @@ pub struct Session {
     held: HashSet<PhysicalKey>,
     focused: bool,
     mouse: Option<(i32, i32, bool)>,
+    /// What this PC typed and hasn't sent yet (up to `Typed::MAX` go with each frame).
+    typed: VecDeque<char>,
     my_prints: HashMap<u32, u64>,
     peer_prints: HashMap<(u8, u32), u64>,
     /// Readable game state at recent check frames, written out when a desync shows up.
@@ -158,6 +172,20 @@ pub struct Session {
     heartbeat: Arc<Heartbeat>,
     /// When each player's heartbeat last came, and the frame their game was at.
     alive: HashMap<u8, (Instant, u32)>,
+    /// Each player's round trip to the host (the host measures, then tells everyone).
+    round_trips: [Option<u32>; crate::coop::lockstep::MAX_PLAYERS],
+    /// Host: the last ping sent, when, and its number.
+    ping_sent: Option<(u32, Instant)>,
+    /// A short message for the window ("Sam left"), and when it came.
+    notice: Option<(String, Instant)>,
+    /// The chat box while it is open (what's typed so far); keys go there, not to the game.
+    chat_box: Option<String>,
+    /// This PC's chat line, sent with the next input.
+    chat_to_send: Option<String>,
+    /// Chat lines by the frame the games hear them on.
+    chat_at: std::collections::BTreeMap<u32, Vec<(u8, String)>>,
+    /// Chat lines heard (name, text, when), for the window.
+    chat_log: VecDeque<(String, String, Instant)>,
     stall_explained: bool,
     /// Tests: leave without a goodbye, as a killed Ruffle does.
     #[cfg(test)]
@@ -589,6 +617,7 @@ impl Session {
                 frame_rate_milli: 0,
                 save,
                 players,
+                options: opts.options.clone(),
             };
             link.send(&me);
             link.send(&start);
@@ -627,7 +656,7 @@ impl Session {
             }
         };
 
-        let Msg::Start { delay, start_unix_ms, save, players, .. } = start else {
+        let Msg::Start { delay, start_unix_ms, save, players, options, .. } = start else {
             unreachable!("start is always a Start message");
         };
         let player_count = players.len() as u8;
@@ -638,6 +667,10 @@ impl Session {
         let names: Vec<String> = players.into_iter().map(|(_, name)| name).collect();
         let mut stepper = Stepper::new(opts.game.keys(), player_count, your_index);
         stepper.set_names(&names);
+        for slot in 0..player_count {
+            stepper.add_event(format!("join {slot}"));
+        }
+        stepper.set_options(&options);
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
         // every PC keeps what the game saves in its own co-op save for this game
         let (storage, save_gate) = match &opts.save_dir {
@@ -664,6 +697,7 @@ impl Session {
             stepper,
             game: opts.game.clone(),
             swf_name: opts.swf.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+            link_id: opts.link_id.clone(),
             local_index: your_index,
             peers,
             hosting,
@@ -677,6 +711,7 @@ impl Session {
             held: HashSet::new(),
             focused: true,
             mouse: None,
+            typed: VecDeque::new(),
             my_prints: HashMap::new(),
             peer_prints: HashMap::new(),
             my_states: HashMap::new(),
@@ -690,6 +725,13 @@ impl Session {
             state: SessionState::default(),
             heartbeat,
             alive: HashMap::new(),
+            round_trips: [None; crate::coop::lockstep::MAX_PLAYERS],
+            ping_sent: None,
+            notice: None,
+            chat_box: None,
+            chat_to_send: None,
+            chat_at: Default::default(),
+            chat_log: VecDeque::new(),
             stall_explained: false,
             #[cfg(test)]
             vanish: false,
@@ -723,6 +765,31 @@ impl Session {
     }
 
     pub fn key(&mut self, key: PhysicalKey, down: bool) {
+        if let Some(text) = &mut self.chat_box {
+            if down {
+                match key {
+                    PhysicalKey::Enter | PhysicalKey::NumpadEnter => {
+                        let line: String = text.trim().chars().take(CHAT_MAX).collect();
+                        if !line.is_empty() {
+                            self.chat_to_send = Some(line);
+                        }
+                        self.chat_box = None;
+                    }
+                    PhysicalKey::Escape => self.chat_box = None,
+                    PhysicalKey::Backspace => {
+                        text.pop();
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+        // "/" opens the chat box, unless the key map gives it to the game
+        if down && key == PhysicalKey::Slash && !self.game.has_local_code(191) {
+            self.chat_box = Some(String::new());
+            self.held.clear();
+            return;
+        }
         if down {
             self.held.insert(key);
         } else {
@@ -736,6 +803,25 @@ impl Session {
         self.mouse = Some((x, y, down.unwrap_or(was_down)));
     }
 
+    /// A character this PC typed (or a text key, see `lockstep::text_control_char`): every PC
+    /// types it into the game, on the frame it travels with. Only while a text box is selected or
+    /// the game reads `coop.typed`; otherwise only a key of the key map types (keyPress buttons),
+    /// so a stray key can't trigger a game's shortcut for everyone.
+    pub fn typed(&mut self, c: char, text_box: bool) {
+        if let Some(text) = &mut self.chat_box {
+            // the "/" that opened the box types itself too: leave it out
+            if !(text.is_empty() && c == '/') && !c.is_control() && !crate::coop::lockstep::is_text_control(c) && text.chars().count() < CHAT_MAX {
+                text.push(c);
+            }
+            return;
+        }
+        let wanted = text_box || self.stepper.wants_text();
+        let text_key = crate::coop::lockstep::is_text_control(c);
+        if self.focused && (wanted || (!text_key && self.game.has_local_char(c))) {
+            self.typed.push_back(c);
+        }
+    }
+
     /// Keys held while the window loses focus would stay pressed; let go of them.
     pub fn focus(&mut self, focused: bool) {
         self.focused = focused;
@@ -744,14 +830,21 @@ impl Session {
         }
     }
 
-    fn local_input(&self) -> InputFrame {
+    fn local_input(&mut self) -> InputFrame {
         if let Some(script) = &self.script {
             return script.input(self.local_sent as usize, self.local_index as usize);
+        }
+        let mut text = Typed::default();
+        while let Some(&c) = self.typed.front()
+            && text.push(c)
+        {
+            self.typed.pop_front();
         }
         InputFrame {
             buttons: if self.focused { self.game.local_buttons(&self.held) } else { 0 },
             // every PC's mouse travels as its slot's mouse; only the host's moves Ruffle's mouse
             mouse: self.mouse,
+            text,
         }
     }
 
@@ -781,18 +874,50 @@ impl Session {
                             self.peer_prints.insert((p, frame), hash);
                             self.compare(frame);
                         }
-                        Msg::Bye { player: p, reason } if player_of(p) => {
-                            self.close(format!("{} left ({reason})", self.name(p)));
+                        // the host's goodbye ends the game; a friend's lets them go and the rest
+                        // play on (the host tells everyone the frame, see `Msg::Left`)
+                        Msg::Bye { player: 0, reason } if !self.hosting => {
+                            self.close(format!("{} left ({reason})", self.name(0)));
+                        }
+                        Msg::Bye { player: p, reason } if self.hosting && player_of(p) => {
+                            self.let_go(p, format!("{} left ({reason})", self.name(p)));
+                        }
+                        Msg::Left { player: p, frame } if !self.hosting && p != self.local_index => {
+                            self.lockstep.leave(p, frame);
+                            self.alive.remove(&p);
+                            self.notice = Some((format!("{} left", self.name(p)), Instant::now()));
                         }
                         Msg::Alive { player: p, frame } if p != self.local_index && player_of(p) => {
                             self.alive.insert(p, (Instant::now(), frame));
+                        }
+                        Msg::Ping { seq } if !self.hosting => self.link.send(&Msg::Pong { seq }),
+                        Msg::Pong { seq } if self.hosting => {
+                            if let Some((sent, at)) = self.ping_sent
+                                && sent == seq
+                            {
+                                self.round_trips[slot as usize] = Some(at.elapsed().as_millis() as u32);
+                            }
+                        }
+                        Msg::Chat { player: p, frame, text } if p != self.local_index && player_of(p) => {
+                            let text: String = text.chars().filter(|c| !c.is_control()).take(CHAT_MAX).collect();
+                            self.chat_at.entry(frame).or_default().push((p, text));
+                        }
+                        Msg::Pings { ms } if !self.hosting => {
+                            for (slot, ms) in ms.into_iter().enumerate().take(self.round_trips.len()) {
+                                self.round_trips[slot] = ms;
+                            }
                         }
                         _ => {}
                     }
                 }
                 Event::Left { player: conn } => {
                     if let Some(&slot) = self.peers.get(&conn) {
-                        self.close(format!("{}'s connection closed {NO_GOODBYE}", self.name(slot)));
+                        let reason = format!("{}'s connection closed {NO_GOODBYE}", self.name(slot));
+                        if self.hosting {
+                            self.let_go(slot, reason);
+                        } else {
+                            self.close(reason);
+                        }
                     }
                 }
                 Event::Closed(reason) => self.close(reason),
@@ -805,6 +930,15 @@ impl Session {
         }
 
         let now = Instant::now();
+        if self.hosting && self.ping_sent.is_none_or(|(_, at)| now - at >= PING_EVERY) {
+            // the last round's results go out, then the next round starts
+            self.round_trips[0] = Some(0);
+            self.link.send(&Msg::Pings { ms: self.round_trips.to_vec() });
+            let seq = self.ping_sent.map_or(1_000_000, |(seq, _)| seq + 1);
+            self.link.send(&Msg::Ping { seq });
+            self.ping_sent = Some((seq, now));
+        }
+        self.stepper.set_pings(self.pings());
         self.timing.tick(now);
         let frame_time = Duration::from_secs_f64(1.0 / player.frame_rate());
         for _ in 0..MAX_CATCH_UP {
@@ -824,6 +958,11 @@ impl Session {
             while self.local_sent <= self.lockstep.frame() {
                 let input = self.local_input();
                 let (frame, input) = self.lockstep.push_local(input);
+                // a chat line goes just before its frame's input, so every game hears it then
+                if let Some(text) = self.chat_to_send.take() {
+                    self.link.send(&Msg::Chat { player: self.local_index, frame, text: text.clone() });
+                    self.chat_at.entry(frame).or_default().push((self.local_index, text));
+                }
                 self.taken_at.insert(frame, Instant::now());
                 self.link.send(&Msg::Input { player: self.local_index, frame, input });
                 self.local_sent += 1;
@@ -832,6 +971,19 @@ impl Session {
             let frame = self.lockstep.frame();
             self.heartbeat.frame.store(frame, Ordering::Relaxed);
             self.heartbeat.step_started.store(self.heartbeat.ms(), Ordering::Relaxed);
+            for slot in self.lockstep.leaving_now() {
+                self.stepper.add_event(format!("leave {slot}"));
+            }
+            if let Some(mut lines) = self.chat_at.remove(&frame) {
+                lines.sort_by_key(|(slot, _)| *slot);
+                for (slot, text) in lines {
+                    self.stepper.add_event(format!("chat {slot} {text}"));
+                    self.chat_log.push_back((self.name(slot), text, Instant::now()));
+                    if self.chat_log.len() > 8 {
+                        self.chat_log.pop_front();
+                    }
+                }
+            }
             self.stepper.step(player, &inputs);
             self.heartbeat.step_started.store(0, Ordering::Relaxed);
             let took = step_started.elapsed();
@@ -913,6 +1065,41 @@ impl Session {
             .unwrap_or_else(|| format!("Player {}", player + 1))
     }
 
+    /// Host: a friend left. Everyone plays on without them: they hold nothing from the frame
+    /// after their last input the host has (every friend got those inputs through the host, so
+    /// every PC can stop them at the same frame), and the host tells everyone that frame.
+    fn let_go(&mut self, slot: u8, reason: String) {
+        if self.lockstep.is_gone(slot) {
+            return;
+        }
+        let frame = self.lockstep.leave_frame(slot);
+        self.lockstep.leave(slot, frame);
+        self.link.send(&Msg::Left { player: slot, frame });
+        self.alive.remove(&slot);
+        self.peers.retain(|_, s| *s != slot);
+        tracing::warn!("Ruffle Together: {reason}; the others play on from frame {frame}");
+        self.notice = Some((reason, Instant::now()));
+    }
+
+    /// For the window: recent chat lines ("Sam: gg") and the open chat box's text, if open.
+    pub fn chat_view(&self) -> (Vec<String>, Option<String>) {
+        let lines = self
+            .chat_log
+            .iter()
+            .filter(|(.., at)| self.chat_box.is_some() || at.elapsed() < CHAT_SHOWN)
+            .map(|(name, text, _)| format!("{name}: {text}"))
+            .collect();
+        (lines, self.chat_box.clone())
+    }
+
+    /// A message for the window while it's fresh (a few seconds): "Sam left".
+    pub fn notice(&self) -> Option<String> {
+        self.notice
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(6))
+            .map(|(text, _)| text.clone())
+    }
+
     fn close(&mut self, reason: String) {
         if self.state.closed.is_none() {
             tracing::warn!("Ruffle Together: {reason}");
@@ -990,6 +1177,33 @@ impl Session {
     }
 
     /// The next frame to run (for logs).
+    /// This PC's round trip to each player, in ms (`coop.ping`): to the host it's this PC's own;
+    /// to another friend it goes through the host, so both trips add up; to itself it's 0.
+    pub fn pings(&self) -> [Option<u32>; crate::coop::lockstep::MAX_PLAYERS] {
+        let me = self.local_index as usize;
+        let mut pings = [None; crate::coop::lockstep::MAX_PLAYERS];
+        for (slot, ping) in pings.iter_mut().enumerate().take(self.names.len()) {
+            *ping = if slot == me {
+                Some(0)
+            } else if self.hosting {
+                self.round_trips[slot]
+            } else if slot == 0 {
+                self.round_trips[me]
+            } else {
+                self.round_trips[me].zip(self.round_trips[slot]).map(|(a, b)| a + b)
+            };
+        }
+        pings
+    }
+
+    /// "Paused by Sam" while the game is paused (for the window).
+    pub fn paused_text(&self) -> Option<String> {
+        self.stepper.paused().map(|by| match by {
+            crate::coop::frame::PausedBy::Player(slot) => format!("Paused by {}", self.name(slot)),
+            crate::coop::frame::PausedBy::Game => "Paused".to_string(),
+        })
+    }
+
     /// The name tags the game asked for (`coop.label`), for the window to draw.
     pub fn labels(&self) -> Vec<crate::coop::api::Label> {
         self.stepper.labels()
@@ -1000,10 +1214,22 @@ impl Session {
     }
 
     /// What the window title shows.
-    /// What Discord shows: the game, then the room (or direct) and how many play.
-    pub fn presence(&self) -> (String, String) {
+    /// What Discord shows: the game, the room (or direct), how many play, and a Join button for
+    /// a relay room when the launcher said which game this is.
+    pub fn presence(&self) -> crate::coop::discord::Presence {
+        let playing = (0..self.names.len() as u8).filter(|&p| !self.lockstep.is_gone(p)).count() as u8;
         let where_ = self.room.as_ref().map_or("direct game".to_string(), |code| format!("room {code}"));
-        (format!("Playing {}", self.swf_name), format!("{where_}, {} players", self.names.len()))
+        let join = self
+            .room
+            .as_ref()
+            .zip(self.link_id.as_ref())
+            .and_then(|(code, id)| crate::coop::discord::join_link(id, code));
+        crate::coop::discord::Presence {
+            details: format!("Playing {}", self.swf_name),
+            state: where_,
+            party: Some((playing, self.names.len() as u8)),
+            join,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -1071,6 +1297,7 @@ impl Drop for Session {
 mod tests {
     use super::*;
     use crate::coop::replay::headless_player;
+    use ruffle_core::external::Value;
     use std::net::TcpListener;
     use ruffle_core::backend::storage::StorageBackend;
     use std::fs;
@@ -1113,6 +1340,8 @@ mod tests {
             game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
             save_start: SaveStart::Coop,
+            options: vec![],
+            link_id: None,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,
@@ -1189,6 +1418,116 @@ mod tests {
         // the same game on both PCs, checked every 25 frames (frames 24, 49, ... 974 are check frames)
         assert_eq!(host_session.print_at(974), join_session.print_at(974));
         assert!(host_session.print_at(974).is_some());
+    }
+
+    /// The host measures every friend's round trip and tells everyone: both PCs know the ping
+    /// between them (`coop.ping`) after a couple of rounds.
+    #[test]
+    fn both_pcs_learn_their_ping() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let run = |opts: SessionOpts| {
+            let swf = opts.swf.clone();
+            let mut session = Session::start(opts).expect("session");
+            let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+            let mut player = player.lock().expect("player");
+            let end = Instant::now() + Duration::from_secs(6);
+            while Instant::now() < end && session.state.closed.is_none() {
+                session.tick(&mut player);
+                thread::sleep(Duration::from_millis(5));
+            }
+            session
+        };
+        let host = thread::spawn(move || {
+            let mut opts = opts(Role::HostDirect { port }, &host_swf, 0);
+            opts.paced = true;
+            run(opts)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let mut opts = opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0);
+            opts.paced = true;
+            run(opts)
+        });
+        let (host, join) = (host.join().expect("host"), join.join().expect("join"));
+        assert_eq!(host.pings()[0], Some(0), "to itself");
+        let host_to_friend = host.pings()[1].expect("the host measured the friend");
+        let friend_to_host = join.pings()[0].expect("the friend heard its round trip");
+        assert!(host_to_friend < 500 && friend_to_host < 500, "{host_to_friend} {friend_to_host} ms on one PC");
+        assert_eq!(join.pings()[1], Some(0));
+        assert_eq!(join.pings()[2], None, "only 2 players");
+    }
+
+    /// The chat box: "/" opens it (keys stop reaching the game), typing fills it, Enter sends the
+    /// line, and every PC's game hears it as an event; both windows show it.
+    #[test]
+    fn a_chat_line_reaches_every_game() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let run = |opts: SessionOpts, chat: bool| {
+            let swf = opts.swf.clone();
+            let mut session = Session::start(opts).expect("session");
+            let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+            let mut player = player.lock().expect("player");
+            let end = Instant::now() + Duration::from_secs(60);
+            let mut said = false;
+            while Instant::now() < end && session.state.closed.is_none() && session.frame() < 300 {
+                if chat && !said && session.frame() >= 50 {
+                    session.key(PhysicalKey::Slash, true);
+                    session.typed('/', false);
+                    assert_eq!(session.chat_view().1.as_deref(), Some(""), "open, without the /");
+                    for c in "hi therex".chars() {
+                        session.typed(c, false);
+                    }
+                    session.key(PhysicalKey::Backspace, true);
+                    session.key(PhysicalKey::Enter, true);
+                    assert_eq!(session.chat_view().1, None, "Enter closes it");
+                    said = true;
+                }
+                session.tick(&mut player);
+                thread::sleep(Duration::from_millis(1));
+            }
+            session
+        };
+        let host = thread::spawn(move || run(opts(Role::HostDirect { port }, &host_swf, 0), true));
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || run(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0), false));
+        let (host, join) = (host.join().expect("host"), join.join().expect("join"));
+        for session in [&host, &join] {
+            let events = session.stepper.api().lock().expect("api").events.clone();
+            assert!(events.contains(&"chat 0 hi there".to_string()), "{events:?}");
+            assert_eq!(session.chat_view().0, vec!["tester: hi there".to_string()]);
+        }
+        assert_eq!(host.state.desync_at, None);
+        assert_eq!(join.state.desync_at, None);
+    }
+
+    /// The host's `--coop-option`s reach every player's `coop.option`; a friend's own are ignored.
+    #[test]
+    fn every_player_gets_the_hosts_options() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || {
+            let mut opts = opts(Role::HostDirect { port }, &host_swf, 0);
+            opts.options = vec![("map".into(), "3".into()), ("mode".into(), "team".into())];
+            play(opts, 30, None)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let mut opts = opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0);
+            opts.options = vec![("map".into(), "9".into())];
+            play(opts, 30, None)
+        });
+        let (_, host_session) = host.join().expect("host");
+        let (_, join_session) = join.join().expect("join");
+        for session in [&host_session, &join_session] {
+            let mut api = session.stepper.api().lock().expect("api");
+            assert_eq!(api.answer("coop.option", &[Value::String("map".into())]), Value::String("3".into()));
+            assert_eq!(api.answer("coop.option", &[Value::String("mode".into())]), Value::String("team".into()));
+        }
     }
 
     /// Measured in the lab (tools/coop-lab/lab.py, relay with lag): a delay of d frames runs
@@ -1374,7 +1713,7 @@ mod tests {
     }
 
     #[test]
-    fn friend_leaving_stops_the_host_waiting() {
+    fn friend_leaving_lets_the_host_play_on() {
         let Some(swf) = test_swf() else { return };
         let port = free_port();
         let host_swf = swf.clone();
@@ -1387,9 +1726,15 @@ mod tests {
         let (_, join_session) = join.join().expect("join");
         let left_at = Instant::now();
         drop(join_session);
-        let (host_state, _) = host.join().expect("host");
-        assert_eq!(host_state.closed.as_deref(), Some("tester left (closed the game)"));
-        assert!(left_at.elapsed() < Duration::from_secs(6));
+        let (host_state, host_session) = host.join().expect("host");
+        assert_eq!(host_state.closed, None, "the host plays on");
+        assert!(host_session.frame() >= 5000, "at {}", host_session.frame());
+        assert_eq!(host_session.notice.as_ref().map(|(n, _)| n.as_str()), Some("tester left (closed the game)"));
+        assert!(left_at.elapsed() < Duration::from_secs(60));
+        // the game heard it: everyone joined, then the friend left
+        let events = host_session.stepper.api().lock().expect("api").events.clone();
+        assert_eq!(events.front().map(String::as_str), Some("join 0"));
+        assert!(events.contains(&"leave 1".to_string()), "{events:?}");
     }
 
     /// The three ways a player stops, worded so a log tells them apart.
@@ -1425,7 +1770,7 @@ mod tests {
         let mut player = player.lock().expect("player");
         let end = Instant::now() + Duration::from_secs(60);
         let mut reasons = vec![];
-        while Instant::now() < end && host.tick(&mut player).closed.is_none() {
+        while Instant::now() < end && host.tick(&mut player).closed.is_none() && host.notice.is_none() {
             let stalled = host.last_frame_at.elapsed();
             if stalled > EXPLAIN_STALL && reasons.is_empty() {
                 reasons = host.stall_reasons(stalled);
@@ -1435,7 +1780,9 @@ mod tests {
         friend.join().expect("friend");
         assert_eq!(reasons.len(), 1, "{reasons:?}");
         assert!(reasons[0].contains("tester's Ruffle is still running"), "{reasons:?}");
-        assert_eq!(host.state.closed.as_deref(), Some("tester left (closed the game)"));
+        // when the frozen friend finally quits, the host plays on without them
+        assert_eq!(host.state.closed, None);
+        assert_eq!(host.notice.as_ref().map(|(n, _)| n.as_str()), Some("tester left (closed the game)"));
     }
 
     /// A Ruffle that is killed sends no goodbye: the others say the connection closed without one.
@@ -1450,9 +1797,10 @@ mod tests {
         let (_, mut friend) = play(opts(Role::JoinDirect { addr }, &swf, 0), 5000, Some(100));
         friend.vanish = true;
         drop(friend);
-        let (host_state, _) = host.join().expect("host");
-        let closed = host_state.closed.unwrap_or_default();
-        assert!(closed.contains("tester's connection closed without a goodbye"), "{closed}");
+        let (host_state, host_session) = host.join().expect("host");
+        assert_eq!(host_state.closed, None, "the host plays on");
+        let notice = host_session.notice.as_ref().map(|(n, _)| n.clone()).unwrap_or_default();
+        assert!(notice.contains("tester's connection closed without a goodbye"), "{notice}");
     }
 
     /// Every PC sends its own mouse as its slot's mouse, and every PC sees all of them the same.
@@ -1535,6 +1883,53 @@ mod tests {
 
     /// Four PCs (host + 3 friends): the host waits for all three, each gets its own slot, and
     /// every game runs the same.
+    #[test]
+    fn three_players_play_on_in_sync_after_one_leaves() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let three = |mut o: SessionOpts| {
+            o.players = 3;
+            o.game = Game::built_in("gun-mayhem-2").expect("built in");
+            o
+        };
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(three(opts(Role::HostDirect { port }, &host_swf, 0)), 1500, None));
+        thread::sleep(Duration::from_millis(300));
+        // the first friend quits at frame 300; the second plays to the end with the host
+        let friends: Vec<_> = [Some(300), None]
+            .into_iter()
+            .enumerate()
+            .map(|(i, stop_at)| {
+                let swf = swf.clone();
+                thread::sleep(Duration::from_millis(100 * i as u64));
+                thread::spawn(move || {
+                    let addr = format!("127.0.0.1:{port}");
+                    let (state, session) = play(three(opts(Role::JoinDirect { addr }, &swf, 0)), 1500, stop_at);
+                    let prints = session.my_prints.clone();
+                    let notice = session.notice();
+                    (state, session.local_index, session.frame(), prints, notice)
+                })
+            })
+            .collect();
+        let results: Vec<_> = friends.into_iter().map(|f| f.join().expect("friend")).collect();
+        let (host_state, host_session) = host.join().expect("host");
+        assert_eq!(host_state.closed, None);
+        assert_eq!(host_state.desync_at, None);
+        let stayer = results.iter().find(|(_, _, frame, ..)| *frame >= 1500).expect("one friend played on");
+        let (state, slot, _, prints, notice) = stayer;
+        assert_eq!(state.desync_at, None, "player {}", slot + 1);
+        assert_eq!(state.closed, None);
+        assert_eq!(notice.as_deref(), Some("tester left"), "the friend who stayed was told");
+        // the same game on both PCs before and after the leave
+        let host_prints = &host_session.my_prints;
+        assert!(host_prints.keys().any(|&f| f > 1000), "checks ran after the leave");
+        for (frame, print) in prints {
+            if let Some(host_print) = host_prints.get(frame) {
+                assert_eq!(print, host_print, "frame {frame}");
+            }
+        }
+    }
+
     #[test]
     fn four_players_stay_in_sync() {
         let Some(swf) = test_swf() else { return };
