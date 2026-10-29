@@ -6,6 +6,9 @@
 //! ExternalInterface.call("coop.mouseX", slot)    that slot's mouse, stage pixels (same space as _root._xmouse)
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
+//! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
+//! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
+//! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
 //! ExternalInterface.call("coop.has", feature)    true if this build has the feature ("camera", "keys", ...)
 //! ExternalInterface.call("coop.name", slot)      that player's name
@@ -28,7 +31,10 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed"];
+
+/// A game that called `coop.typed` within this many frames gets every typed character.
+const WANTS_TEXT_FRAMES: u32 = 60;
 
 /// A slot's camera: the stage point (x, y), in stage pixels, shown at the centre of the screen.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +57,13 @@ pub struct CoopApi {
     pub local_slot: u8,
     /// Each slot's mouse (stage twips) and left button, as of the frame that runs now.
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
+    /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
+    pub buttons: [u16; MAX_PLAYERS],
+    /// Each slot's typed characters this frame.
+    pub typed: [crate::coop::lockstep::Typed; MAX_PLAYERS],
+    /// Frames run, and the frame the game last read `coop.typed`.
+    frame: u32,
+    typed_read_at: Option<u32>,
     pub names: Vec<String>,
     pub cameras: [Option<Camera>; MAX_PLAYERS],
     pub labels: [Option<Label>; MAX_PLAYERS],
@@ -69,6 +82,10 @@ impl CoopApi {
             players,
             local_slot,
             mouse: [(0, 0, false); MAX_PLAYERS],
+            buttons: [0; MAX_PLAYERS],
+            typed: Default::default(),
+            frame: 0,
+            typed_read_at: None,
             names: vec![],
             cameras: [None; MAX_PLAYERS],
             labels: Default::default(),
@@ -81,11 +98,18 @@ impl CoopApi {
 
     /// Takes this frame's inputs; a slot without a mouse this frame keeps its last one.
     pub fn update(&mut self, inputs: &[InputFrame]) {
+        self.frame += 1;
         for (slot, input) in inputs.iter().enumerate().take(MAX_PLAYERS) {
+            self.buttons[slot] = input.buttons;
+            self.typed[slot] = input.text;
             if let Some(mouse) = input.mouse {
                 self.mouse[slot] = mouse;
             }
         }
+    }
+
+    pub fn wants_text(&self) -> bool {
+        self.typed_read_at.is_some_and(|at| self.frame.saturating_sub(at) <= WANTS_TEXT_FRAMES)
     }
 
     /// The camera this PC draws with.
@@ -112,6 +136,28 @@ impl CoopApi {
             ("coop.mouseX", Some(slot)) => Value::Number(self.mouse[slot].0 as f64 / 20.0),
             ("coop.mouseY", Some(slot)) => Value::Number(self.mouse[slot].1 as f64 / 20.0),
             ("coop.mouseDown", Some(slot)) => Value::Bool(self.mouse[slot].2),
+            ("coop.typed", Some(slot)) => {
+                self.typed_read_at = Some(self.frame);
+                let text: String = self.typed[slot]
+                    .chars()
+                    .iter()
+                    .filter_map(|&c| match crate::coop::lockstep::typed_event(c) {
+                        ruffle_core::PlayerEvent::TextInput { codepoint } => Some(codepoint),
+                        ruffle_core::PlayerEvent::TextControl { code } => match code {
+                            ruffle_core::events::TextControlCode::Backspace => Some('\u{8}'),
+                            ruffle_core::events::TextControlCode::Enter => Some('\n'),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect();
+                Value::String(text)
+            }
+            ("coop.buttons", Some(slot)) => Value::Number(self.buttons[slot].into()),
+            ("coop.button", Some(slot)) => match text(1).and_then(|name| crate::coop::lockstep::button_named(&name)) {
+                Some(button) => Value::Bool(self.buttons[slot] & button != 0),
+                None => Value::Undefined,
+            },
             ("coop.version", _) => Value::Number(VERSION.into()),
             ("coop.has", _) => Value::Bool(text(0).is_some_and(|f| FEATURES.contains(&f.as_str()))),
             ("coop.name", Some(slot)) => self.names.get(slot).map_or(Value::Undefined, |n| Value::String(n.clone())),
@@ -205,8 +251,8 @@ mod tests {
     fn answers_in_stage_pixels_per_slot() {
         let mut api = CoopApi::new(3, 2);
         api.update(&[
-            InputFrame { buttons: 0, mouse: Some((2000, 4000, false)) },
-            InputFrame { buttons: 0, mouse: Some((200, 300, true)) },
+            InputFrame { buttons: 0, mouse: Some((2000, 4000, false)), ..Default::default() },
+            InputFrame { buttons: 0, mouse: Some((200, 300, true)), ..Default::default() },
             InputFrame::default(),
         ]);
         assert_eq!(api.answer("coop.players", &[]), n(3.0));
@@ -221,6 +267,59 @@ mod tests {
         // no mouse this frame: the last one stays
         api.update(&[InputFrame::default(), InputFrame::default(), InputFrame::default()]);
         assert_eq!(api.answer("coop.mouseX", &[n(0.0)]), n(100.0));
+    }
+
+    /// A mod can read every player's buttons directly, without faking keyboard keys.
+    #[test]
+    fn every_slots_buttons() {
+        use crate::coop::lockstep::{FIRE, LEFT, UP};
+        let mut api = CoopApi::new(2, 0);
+        api.update(&[
+            InputFrame { buttons: UP | FIRE, ..Default::default() },
+            InputFrame { buttons: LEFT, ..Default::default() },
+        ]);
+        assert_eq!(api.answer("coop.buttons", &[n(0.0)]), n((UP | FIRE).into()));
+        assert_eq!(api.answer("coop.button", &[n(0.0), s("FIRE")]), Value::Bool(true));
+        assert_eq!(api.answer("coop.button", &[n(1.0), s("FIRE")]), Value::Bool(false));
+        assert_eq!(api.answer("coop.button", &[n(1.0), s("LEFT")]), Value::Bool(true));
+        assert_eq!(api.answer("coop.button", &[n(1.0), s("JUMP")]), Value::Undefined, "no such button");
+        assert_eq!(api.answer("coop.buttons", &[n(2.0)]), Value::Undefined, "only 2 players");
+        assert_eq!(api.answer("coop.has", &[s("buttons")]), Value::Bool(true));
+        // a let-go button reads false on the next frame
+        api.update(&[InputFrame::default(), InputFrame::default()]);
+        assert_eq!(api.answer("coop.buttons", &[n(0.0)]), n(0.0));
+    }
+
+    /// Each player's own typed text this frame, with Backspace and Enter as "\b" and "\n"; reading
+    /// it tells Ruffle the game wants every typed character for a while.
+    #[test]
+    fn every_slots_typed_text() {
+        use crate::coop::lockstep::{Typed, text_control_char};
+        use ruffle_core::events::TextControlCode::{Backspace, Enter, MoveLeft};
+        let mut api = CoopApi::new(2, 0);
+        let typed = |text: &str| Typed::from_chars(text.chars());
+        api.update(&[
+            InputFrame { text: typed("Hi"), ..Default::default() },
+            InputFrame {
+                text: Typed::from_chars([
+                    'x',
+                    text_control_char(Backspace),
+                    text_control_char(MoveLeft),
+                    text_control_char(Enter),
+                ]),
+                ..Default::default()
+            },
+        ]);
+        assert!(!api.wants_text());
+        assert_eq!(api.answer("coop.typed", &[n(0.0)]), s("Hi"));
+        assert_eq!(api.answer("coop.typed", &[n(1.0)]), s("x\u{8}\n"), "other text keys left out");
+        assert!(api.wants_text());
+        api.update(&[InputFrame::default(), InputFrame::default()]);
+        assert_eq!(api.answer("coop.typed", &[n(0.0)]), s(""), "typed once");
+        for _ in 0..=WANTS_TEXT_FRAMES {
+            api.update(&[InputFrame::default(), InputFrame::default()]);
+        }
+        assert!(!api.wants_text(), "not read for a while");
     }
 
     #[test]

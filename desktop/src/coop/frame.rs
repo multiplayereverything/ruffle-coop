@@ -4,7 +4,7 @@
 
 use crate::coop::api::{CoopApi, CoopApiProvider};
 use crate::coop::keymap::{Game, GameKeys};
-use crate::coop::lockstep::InputFrame;
+use crate::coop::lockstep::{InputFrame, typed_event};
 use ruffle_core::events::MouseButton;
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::{FloatDuration, Player, PlayerEvent};
@@ -57,6 +57,10 @@ impl Stepper {
             for event in self.keys.events(slot as u8, input.buttons) {
                 player.handle_event(event);
             }
+            // what each player typed, in slot order: names, chat, keyPress buttons
+            for &c in input.text.chars() {
+                player.handle_event(typed_event(c));
+            }
         }
         let mouse = inputs.first().and_then(|input| input.mouse);
         if mouse != self.mouse
@@ -91,6 +95,11 @@ impl Stepper {
         // rendering has side effects on the game (e.g. scrollRect updates), so it happens
         // exactly once per frame on every PC
         player.render();
+    }
+
+    /// Whether the game reads `coop.typed` (every typed character is wanted then).
+    pub fn wants_text(&self) -> bool {
+        self.api.lock().is_ok_and(|api| api.wants_text())
     }
 
     /// Every player's name, for `coop.name`.
@@ -153,7 +162,7 @@ mod tests {
         let frame = Duration::from_secs_f64(1.0 / player.frame_rate());
 
         let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
-        let inputs = [InputFrame { buttons: UP, mouse: Some((200, 400, true)) }, InputFrame::default()];
+        let inputs = [InputFrame { buttons: UP, mouse: Some((200, 400, true)), ..Default::default() }, InputFrame::default()];
         stepper.step(&mut player, &inputs);
         stepper.step(&mut player, &inputs);
 
@@ -170,7 +179,7 @@ mod tests {
             let mut player = player.lock().expect("player");
             player.set_mouse_in_stage(false); // this PC's own cursor is outside its window
             let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
-            let inputs = [InputFrame { buttons: 0, mouse: Some((4001, 3999, false)) }];
+            let inputs = [InputFrame { buttons: 0, mouse: Some((4001, 3999, false)), ..Default::default() }];
             stepper.step(&mut player, &inputs);
             assert!(player.mouse_in_stage(), "the host's mouse is always in the stage");
             spots.push(player.mouse_position_twips());
@@ -275,6 +284,34 @@ mod tests {
         assert!(player.preload(&mut ruffle_core::limits::ExecutionLimit::exhausted()));
     }
 
+    /// Ruffle's own AS2 text-input test: a selected text box, traced on Escape. Two players type
+    /// into it (in slot order, on the same frame), Backspace included, then Escape shows it.
+    #[test]
+    fn every_players_typing_reaches_the_selected_text_box() {
+        use crate::coop::lockstep::{Typed, text_control_char};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/tests/swfs");
+        let movie =
+            ruffle_core::tag_utils::movie_from_path(root.join("avm1/edittext_input/test.swf"), None).expect("test swf");
+        let traces = Arc::new(Mutex::new(vec![]));
+        let player = PlayerBuilder::new()
+            .with_movie(movie)
+            .with_log(Traces(traces.clone()))
+            .with_autoplay(true)
+            .build();
+        let mut player = player.lock().expect("player");
+        let escape = Game::parse("t", "slot 0: FIRE=27\nslot 1: FIRE=27").expect("map").keys();
+        let mut stepper = Stepper::new(escape, 2, 0);
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
+        assert!(player.coop_text_box_focused(), "the SWF selects its text box");
+        let typed = |text: &str| InputFrame { text: Typed::from_chars(text.chars()), ..Default::default() };
+        let backspace = Typed::from_chars([text_control_char(ruffle_core::events::TextControlCode::Backspace)]);
+        stepper.step(&mut player, &[typed("Lia"), typed("xm")]);
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame { text: backspace, ..Default::default() }]);
+        stepper.step(&mut player, &[typed("!"), InputFrame::default()]);
+        stepper.step(&mut player, &[InputFrame { buttons: FIRE, ..Default::default() }, InputFrame::default()]);
+        assert_eq!(traces.lock().expect("traces").last().map(String::as_str), Some("Liax!"));
+    }
+
     /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.
     fn bic(local_slot: u8) -> Option<(Arc<Mutex<Player>>, Stepper)> {
         let swf = std::env::var("COOP_TEST_SWF").ok()?;
@@ -318,7 +355,7 @@ mod tests {
         set_cameras(&friend_stepper, cameras);
         let (mut host, mut friend, mut plain) =
             (host.lock().expect("lock"), friend.lock().expect("lock"), plain.lock().expect("lock"));
-        let inputs = [InputFrame { buttons: UP, mouse: None }, InputFrame::default()];
+        let inputs = [InputFrame { buttons: UP, mouse: None, ..Default::default() }, InputFrame::default()];
         for frame in 0..120 {
             host_stepper.step(&mut host, &inputs);
             friend_stepper.step(&mut friend, &inputs);
@@ -377,7 +414,7 @@ mod tests {
             assert_eq!(answer, Value::Bool(true));
         };
         give(&stepper);
-        let fire = [InputFrame { buttons: FIRE, mouse: None }, InputFrame::default()];
+        let fire = [InputFrame { buttons: FIRE, mouse: None, ..Default::default() }, InputFrame::default()];
         stepper.step(&mut player, &fire); // the switch happens at the end of this frame
         assert_eq!(stepper.game_keys.as_deref(), Some(map));
         // the new map: slot 0's FIRE is A now (it was Space), and nothing is held yet

@@ -467,12 +467,37 @@ impl MainWindow {
     /// Ruffle Together: this PC's keys and mouse go to the session, which sends them to everyone
     /// and presses them on every PC's game at the same frame. Nothing reaches the game directly.
     fn coop_input(&self, event: PlayerEvent) -> bool {
+        // the most a paste types (it travels with the inputs, 8 characters a frame)
+        const PASTE_LIMIT: usize = 64;
         let Some(mut session) = crate::coop::session() else {
             return false;
         };
         match event {
             PlayerEvent::KeyDown { key } => session.key(key.physical_key, true),
             PlayerEvent::KeyUp { key } => session.key(key.physical_key, false),
+            PlayerEvent::TextInput { .. } | PlayerEvent::TextControl { .. } => {
+                use ruffle_core::events::TextControlCode;
+                let Some(mut player) = self.player.get() else {
+                    return true;
+                };
+                let text_box = player.coop_text_box_focused();
+                match event {
+                    PlayerEvent::TextInput { codepoint } => session.typed(codepoint, text_box),
+                    PlayerEvent::TextControl { code: TextControlCode::Paste } => {
+                        // this PC's clipboard, as typed characters every PC gets
+                        let pasted = player.ui_mut().clipboard_content();
+                        for c in pasted.chars().filter(|c| !c.is_control()).take(PASTE_LIMIT) {
+                            session.typed(c, text_box);
+                        }
+                    }
+                    PlayerEvent::TextControl { code: TextControlCode::Copy } => {}
+                    PlayerEvent::TextControl { code } => {
+                        let code = if code == TextControlCode::Cut { TextControlCode::Delete } else { code };
+                        session.typed(crate::coop::lockstep::text_control_char(code), text_box);
+                    }
+                    _ => {}
+                }
+            }
             PlayerEvent::FocusGained => session.focus(true),
             PlayerEvent::FocusLost => session.focus(false),
             PlayerEvent::MouseMove { x, y }

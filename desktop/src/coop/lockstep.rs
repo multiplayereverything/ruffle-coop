@@ -1,5 +1,6 @@
 //! Which frame may run next: a frame runs only once every player's input for it is in.
 
+use ruffle_core::events::TextControlCode;
 use std::collections::BTreeMap;
 
 pub const UP: u16 = 1;
@@ -50,6 +51,72 @@ pub struct InputFrame {
     pub buttons: u16,
     /// Host only: mouse position in stage twips and whether the button is down.
     pub mouse: Option<(i32, i32, bool)>,
+    /// What the player typed this frame (names, chat), for the game's text fields.
+    pub text: Typed,
+}
+
+/// Characters typed on one PC in one frame, in order: up to 8 (more wait for the next frame).
+/// Text keys (Backspace, Enter, arrows in a text field...) are private-use characters, see
+/// `text_control_char`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Typed {
+    len: u8,
+    chars: [char; Typed::MAX],
+}
+
+impl Typed {
+    pub const MAX: usize = 8;
+
+    /// Adds `c`; false when full.
+    pub fn push(&mut self, c: char) -> bool {
+        if self.len as usize == Self::MAX {
+            return false;
+        }
+        self.chars[self.len as usize] = c;
+        self.len += 1;
+        true
+    }
+
+    pub fn chars(&self) -> &[char] {
+        &self.chars[..self.len as usize]
+    }
+
+    pub fn from_chars(chars: impl IntoIterator<Item = char>) -> Self {
+        let mut typed = Self::default();
+        for c in chars {
+            typed.push(c);
+        }
+        typed
+    }
+}
+
+/// Every text key a text field knows, in a fixed order: each travels as U+E000 + its index.
+const TEXT_CONTROLS: [TextControlCode; 25] = {
+    use TextControlCode::*;
+    [
+        MoveLeft, MoveLeftWord, MoveLeftLine, MoveLeftDocument, MoveRight, MoveRightWord, MoveRightLine,
+        MoveRightDocument, SelectLeft, SelectLeftWord, SelectLeftLine, SelectLeftDocument, SelectRight,
+        SelectRightWord, SelectRightLine, SelectRightDocument, SelectAll, Copy, Paste, Cut, Backspace,
+        BackspaceWord, Enter, Delete, DeleteWord,
+    ]
+};
+
+pub fn text_control_char(code: TextControlCode) -> char {
+    let index = TEXT_CONTROLS.iter().position(|c| *c == code).unwrap_or_default() as u32;
+    char::from_u32(0xE000 + index).unwrap_or('\u{E000}')
+}
+
+pub fn is_text_control(c: char) -> bool {
+    (c as u32).wrapping_sub(0xE000) < TEXT_CONTROLS.len() as u32
+}
+
+/// The game event for a typed character: a text key, or a character to type.
+pub fn typed_event(c: char) -> ruffle_core::PlayerEvent {
+    let index = (c as u32).wrapping_sub(0xE000) as usize;
+    match TEXT_CONTROLS.get(index) {
+        Some(&code) => ruffle_core::PlayerEvent::TextControl { code },
+        None => ruffle_core::PlayerEvent::TextInput { codepoint: c },
+    }
 }
 
 pub struct Lockstep {
@@ -134,8 +201,25 @@ mod tests {
     fn key(buttons: u16) -> InputFrame {
         InputFrame {
             buttons,
-            mouse: None,
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn typed_holds_eight_characters_and_text_keys_round_trip() {
+        let mut typed = Typed::default();
+        for c in "abcdefgh".chars() {
+            assert!(typed.push(c));
+        }
+        assert!(!typed.push('i'), "full");
+        assert_eq!(typed.chars().iter().collect::<String>(), "abcdefgh");
+        for code in TEXT_CONTROLS {
+            let c = text_control_char(code);
+            assert!(is_text_control(c));
+            assert!(matches!(typed_event(c), ruffle_core::PlayerEvent::TextControl { code: back } if back == code));
+        }
+        assert!(!is_text_control('a'));
+        assert!(matches!(typed_event('é'), ruffle_core::PlayerEvent::TextInput { codepoint: 'é' }));
     }
 
     #[test]

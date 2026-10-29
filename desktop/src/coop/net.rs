@@ -505,7 +505,7 @@ mod tests {
             frame: 3,
             input: InputFrame {
                 buttons: UP,
-                mouse: None,
+                ..Default::default()
             },
         };
         join.send(&input);

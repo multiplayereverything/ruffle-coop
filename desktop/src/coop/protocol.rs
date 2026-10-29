@@ -1,7 +1,7 @@
 //! Messages between Ruffle Together players: one text line each, `|`-separated, so they fit the
 //! relay's star rooms (NUL-framed lines) as well as direct connections.
 
-use crate::coop::lockstep::InputFrame;
+use crate::coop::lockstep::{InputFrame, Typed};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Msg {
@@ -83,12 +83,16 @@ pub fn encode(msg: &Msg) -> String {
             player,
             frame,
             input,
-        } => match input.mouse {
-            Some((x, y, down)) => {
-                format!("IN|{player}|{frame}|{}|{x}|{y}|{}", input.buttons, down as u8)
+        } => {
+            let text: String = input.text.chars().iter().collect();
+            let text: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+            match input.mouse {
+                Some((x, y, down)) => {
+                    format!("IN|{player}|{frame}|{}|{x}|{y}|{}|{text}", input.buttons, down as u8)
+                }
+                None => format!("IN|{player}|{frame}|{}|-|-|-|{text}", input.buttons),
             }
-            None => format!("IN|{player}|{frame}|{}|-|-|-", input.buttons),
-        },
+        }
         Msg::Print {
             player,
             frame,
@@ -156,7 +160,16 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             })
         }
         "IN" => {
-            want(7)?;
+            want(8)?;
+            let hex = parts[7];
+            let bytes = (0..hex.len() / 2)
+                .map(|i| u8::from_str_radix(hex.get(i * 2..i * 2 + 2).unwrap_or("zz"), 16))
+                .collect::<Result<Vec<u8>, _>>()
+                .map_err(|_| bad())?;
+            let text = String::from_utf8(bytes).map_err(|_| bad())?;
+            if hex.len() % 2 != 0 || text.chars().count() > Typed::MAX {
+                return Err(bad());
+            }
             let buttons = u16::try_from(num(3)?).map_err(|_| bad())?;
             let mouse = if parts[4] == "-" {
                 None
@@ -168,7 +181,7 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             Ok(Msg::Input {
                 player: byte(1)?,
                 frame: uint(2)?,
-                input: InputFrame { buttons, mouse },
+                input: InputFrame { buttons, mouse, text: Typed::from_chars(text.chars()) },
             })
         }
         "FP" => {
@@ -252,6 +265,7 @@ mod tests {
             input: InputFrame {
                 buttons: UP | FIRE,
                 mouse: None,
+                text: Typed::from_chars("Li|am\u{E014}é".chars()),
             },
         });
         roundtrip(Msg::Input {
@@ -260,6 +274,7 @@ mod tests {
             input: InputFrame {
                 buttons: 0,
                 mouse: Some((-20, 11000, true)),
+                ..Default::default()
             },
         });
         roundtrip(Msg::Print {

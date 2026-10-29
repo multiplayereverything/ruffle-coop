@@ -3,7 +3,7 @@
 
 use crate::coop::frame::Stepper;
 use crate::coop::keymap::Game;
-use crate::coop::lockstep::{InputFrame, Lockstep};
+use crate::coop::lockstep::{InputFrame, Lockstep, Typed};
 use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
@@ -13,7 +13,7 @@ use ruffle_core::Player;
 use ruffle_core::events::PhysicalKey;
 use ruffle_core::frame_clock::FrameClock;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -131,6 +131,8 @@ pub struct Session {
     held: HashSet<PhysicalKey>,
     focused: bool,
     mouse: Option<(i32, i32, bool)>,
+    /// What this PC typed and hasn't sent yet (up to `Typed::MAX` go with each frame).
+    typed: VecDeque<char>,
     my_prints: HashMap<u32, u64>,
     peer_prints: HashMap<(u8, u32), u64>,
     /// Readable game state at recent check frames, written out when a desync shows up.
@@ -643,6 +645,7 @@ impl Session {
             held: HashSet::new(),
             focused: true,
             mouse: None,
+            typed: VecDeque::new(),
             my_prints: HashMap::new(),
             peer_prints: HashMap::new(),
             my_states: HashMap::new(),
@@ -702,6 +705,18 @@ impl Session {
         self.mouse = Some((x, y, down.unwrap_or(was_down)));
     }
 
+    /// A character this PC typed (or a text key, see `lockstep::text_control_char`): every PC
+    /// types it into the game, on the frame it travels with. Only while a text box is selected or
+    /// the game reads `coop.typed`; otherwise only a key of the key map types (keyPress buttons),
+    /// so a stray key can't trigger a game's shortcut for everyone.
+    pub fn typed(&mut self, c: char, text_box: bool) {
+        let wanted = text_box || self.stepper.wants_text();
+        let text_key = crate::coop::lockstep::is_text_control(c);
+        if self.focused && (wanted || (!text_key && self.game.has_local_char(c))) {
+            self.typed.push_back(c);
+        }
+    }
+
     /// Keys held while the window loses focus would stay pressed; let go of them.
     pub fn focus(&mut self, focused: bool) {
         self.focused = focused;
@@ -710,14 +725,21 @@ impl Session {
         }
     }
 
-    fn local_input(&self) -> InputFrame {
+    fn local_input(&mut self) -> InputFrame {
         if let Some(script) = &self.script {
             return script.input(self.local_sent as usize, self.local_index as usize);
+        }
+        let mut text = Typed::default();
+        while let Some(&c) = self.typed.front()
+            && text.push(c)
+        {
+            self.typed.pop_front();
         }
         InputFrame {
             buttons: if self.focused { self.game.local_buttons(&self.held) } else { 0 },
             // every PC's mouse travels as its slot's mouse; only the host's moves Ruffle's mouse
             mouse: self.mouse,
+            text,
         }
     }
 
