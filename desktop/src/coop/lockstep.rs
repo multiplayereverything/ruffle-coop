@@ -17,6 +17,8 @@ pub const VIEW: u16 = 1024;
 pub const QUIT: u16 = 2048;
 pub const YES: u16 = 4096;
 pub const NO: u16 = 8192;
+/// A menu key (Esc: pause, skip a cutscene), for games that need one.
+pub const MENU: u16 = 16384;
 
 /// A button by its name in input scripts and key maps (UP, FIRE, KEY1, ...; "0" is none).
 pub fn button_named(name: &str) -> Option<u16> {
@@ -36,6 +38,7 @@ pub fn button_named(name: &str) -> Option<u16> {
         "QUIT" => QUIT,
         "YES" => YES,
         "NO" => NO,
+        "MENU" => MENU,
         _ => return None,
     })
 }

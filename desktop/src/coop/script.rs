@@ -3,7 +3,7 @@
 //! ```text
 //! # comment
 //! p0 UP|FIRE      player 0 holds these from now on (UP DOWN LEFT RIGHT FIRE ALT KEY1-KEY4 VIEW
-//!                 QUIT YES NO, or 0)
+//!                 QUIT YES NO MENU, or 0)
 //! wait 25         25 frames with what is held now
 //! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
 //! move 100 50     host mouse moves (no click)

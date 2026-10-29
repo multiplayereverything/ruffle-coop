@@ -286,7 +286,7 @@ impl GameKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, NO, QUIT, RIGHT, UP, VIEW, YES};
+    use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, MENU, NO, QUIT, RIGHT, UP, VIEW, YES, button_named};
 
     fn game(name: &str) -> Game {
         Game::built_in(name).expect("built in")
@@ -582,6 +582,19 @@ mod tests {
         let mut keys = game("territory-war").keys();
         assert_eq!(typed(&keys.events(0, KEY1)), vec!['1']);
         assert!(typed(&keys.events(1, KEY1)).is_empty());
+    }
+
+    /// Stealth Hunter 2's cutscenes skip with Esc: MENU presses it, for every player.
+    #[test]
+    fn stealth_hunter_2_esc_skips_a_cutscene() {
+        let sh2 = game("stealth-hunter-2");
+        assert_eq!(sh2.local_buttons(&held(&[PhysicalKey::Escape])), MENU);
+        let mut keys = sh2.keys();
+        for slot in 0..4 {
+            assert_eq!(down_keys(&keys.events(slot, MENU)), vec![PhysicalKey::Escape], "slot {slot}");
+            keys.events(slot, 0);
+        }
+        assert_eq!(button_named("MENU"), Some(MENU));
     }
 
     #[test]
