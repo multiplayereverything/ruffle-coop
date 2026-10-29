@@ -37,7 +37,7 @@ const SLOW_FRAME: Duration = Duration::from_secs(2);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
-pub const VERSION: &str = "1.0.3.4";
+pub const VERSION: &str = "1.0.3.5";
 
 /// This build, as the relay and the other players see it: a different build is refused.
 pub fn build_id() -> String {
@@ -1102,7 +1102,7 @@ mod tests {
 
     #[test]
     fn build_id_names_this_release() {
-        assert!(build_id().starts_with("rc-1.0.3.4#"), "{}", build_id());
+        assert!(build_id().starts_with("rc-1.0.3.5#"), "{}", build_id());
         // the relay keeps 32 characters of a version
         assert!(build_id().len() <= 32);
     }
