@@ -290,3 +290,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   plus what the camera shows.
 - Pausing removed (user: "i dont see a reason with coop.pause, get rid of it completely"): no PAUSE button, Esc is an
   ordinary key again, no `coop.pause`, no pause/resume events, no "Paused by" overlay. 147/147, replays unchanged.
+- Release v1.0.3.7 (user: "yes" after the API demo in two real windows): commit 0da417f = local coop 864e0c9
+  (API rounds 2 and 3, play on when a friend leaves, chat, Discord join, fireboy-watergirl map, camera culling
+  fix; pausing removed) + version. Tests 147/147, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay
+  room HD659 1500 frames in sync with the release exe, zip SHA-256 ff93d7ab...6efb, latest, re-downloaded hash
+  matches. mods-info 7a97236.
