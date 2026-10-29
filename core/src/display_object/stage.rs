@@ -473,8 +473,15 @@ impl<'gc> Stage<'gc> {
         self.0.window_mode.set(window_mode);
     }
 
+    /// The visible area in stage coordinates, for culling. With a co-op camera it is both what the
+    /// camera shows (most objects) and the stage itself (the HUD, drawn without the camera).
     pub fn view_bounds(self) -> Rectangle<Twips> {
-        self.0.view_bounds.get()
+        let view = self.0.view_bounds.get();
+        let camera = self.0.coop_camera.get();
+        match camera.inverse() {
+            Some(undo) if camera != Matrix::IDENTITY => view.union(&(undo * view)),
+            _ => view,
+        }
     }
 
     pub fn show_menu(self) -> bool {
