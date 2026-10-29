@@ -6,8 +6,10 @@ at the end), `docs/superpowers/coop-decisions.md`. Game-builder spec sent to eve
 `C:\Users\liam1\AppData\Local\Claude-Data\claude_pzs8sxrjxfjjc\side-session-notes\local_de448b6c-9292-4052-a6e3-594bb10fbc31\ruffle-together-api-and-keymaps.md`.
 
 ## State
-- Released: **v1.0.3.4** (tag on 141b54c; mods-info ruffle-coop 1.0.3.4; launcher auto-updates). It holds everything
-  below: the planned 1.0.4 went out as 1.0.3.4 on the user's word. Next release: 1.0.4. Branch `coop` is pushed.
+- Released: **v1.0.3.5** (tag on b3f0766; mods-info ruffle-coop 1.0.3.5). 1.0.3.4 had the co-op API + key maps;
+  1.0.3.5 adds the sync fixes, keyPress and stop reasons (see coop-log). API round 2 (camera, HUD, labels,
+  coop.keys, Discord, RuffleTogether.as; 5a7a920, merged into LOCAL coop 86caf06) is not released or pushed:
+  its .as library still needs trying in a real game. Browser play: session "Ruffle Together browser play".
   The user's known-good build is kept in `C:\Users\liam1\Desktop\AIStuff\ruffle-stable\` (STABLE.md).
 - In 1.0.3.4 (108/108): co-op API (`coop.players/localSlot/mouseX/mouseY/mouseDown(slot)` via
   ExternalInterface, AS2=AS3; `desktop/src/coop/api.rs`, installed by `Stepper` in `frame.rs`); every PC sends its mouse;

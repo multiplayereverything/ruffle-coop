@@ -247,3 +247,22 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (3300 f, sha 8e30f66c) and TW (2000 f). Tests: desktop 109/109, core lib 131/131, SWF suite 4285 ok / 0 failed.
   windows_lab both modes with the untouched SWF: in sync (no OUT OF SYNC, fingerprints equal) but FAIL on late
   frames/fps: 8 other sessions' Ruffle processes were running. Not released.
+- Smileys War desyncs fixed by the "Find the Smileys War windows_lab desyncs" session (c51a48a, merge ad4cf70):
+  `_xmouse` the same in every window size; sounds end on the frame clock.
+- Intrusion 2 4-player desync at frame 24 (its session's report): Ruffle's 15 s script limit is real time, so on a
+  busy PC a long first-menu script was stopped on some PCs only. Reproduced with 32 busy processes (3/3 desync),
+  sessions now never stop a script (0356d0b): 2/2 in sync. (Loading child movies fully each frame was tried first
+  and did NOT help; reverted.)
+- keyPress buttons (Ultimate Crab Battle's report): sessions only sent key down/up, and AS2 `on(keyPress "1")` and
+  text fields hear the typed character (TextInput); a real keyboard missed it too (the window dropped TextInput).
+  A slot's key press now also types its character (4a3cd49). Crab Battle confirmed on its real menu.
+- Why a game stopped (user's friend NickBin's game stalled mid-round in SH2/GM2/UA; the friend's log only said "the
+  host left"): the session is a static never dropped, so no Bye went out on close. Now a goodbye on window close
+  and from the panic hook (with the crash text, also logged), an Alive heartbeat thread every 1 s (frozen game vs
+  nothing at all), a stall explained after 5 s, slow (>2 s) or stuck frames logged on the PC itself, and the last
+  5 logs kept (ruffle.1.log...). 7b764fe, 115/115. Still unknown: why NickBin's Ruffle stopped (needs its log).
+- Release v1.0.3.5 (user: "release coop as 1.0.3.5", then "Without the API"): commit b3f0766 (API round 2, merged
+  into local coop by its session meanwhile, is NOT in it), tests 115/115, replays BIC fa623659 / GM2 8e30f66c /
+  TW 2p 3000 frames ad6fe22d, zip SHA-256 bf527367...e0ea, latest, re-downloaded hash matches, exe reports
+  b3f0766. Live relay (room TVCBY) with the release exe: 750 frames in sync both, 101 ms median. mods-info
+  4e6077d. GitHub README (master 2a1d7fb) now describes Ruffle Together.

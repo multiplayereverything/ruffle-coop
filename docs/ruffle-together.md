@@ -1,6 +1,6 @@
 # Ruffle Together
 
-Version 1.0.3.4 (build id `rc-1.0.3.4#<commit>`; players must use the same build).
+Version 1.0.3.5 (build id `rc-1.0.3.5#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with up to 3 friends. Every PC runs the same game in this Ruffle
 build; only the key presses travel, and every frame runs on every PC with every player's keys. Everyone gets
@@ -51,7 +51,11 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
-  frame rate, time per frame, and how long the game waited for the other PC's keys.
+  frame rate, time per frame, and how long the game waited for the other PC's keys. The last 5 runs stay as
+  `ruffle.1.log` (the one before) to `ruffle.5.log`.
+- When a game stops, every PC's log says why: "X left (closed the game)", "X left (Ruffle crashed: ...)",
+  "X's Ruffle is still running, but its game hasn't moved past frame N" (it froze), "nothing at all from X"
+  (stopped or network down), or a connection that closed without a goodbye. The PC that froze logs it too.
 
 ## For game builders: key maps
 
