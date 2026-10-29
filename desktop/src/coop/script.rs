@@ -7,6 +7,7 @@
 //! wait 25         25 frames with what is held now
 //! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
 //! move 100 50     host mouse moves (no click)
+//! move 100 50 2   player 2's mouse (any of click/move; the host's when left out)
 //! ```
 
 use crate::coop::lockstep::{
@@ -38,11 +39,19 @@ impl Script {
                 }
                 "click" | "move" => {
                     let (x, y) = (int(1)? * 20, int(2)?.saturating_mul(20));
+                    // a slot's mouse (default: the host's)
+                    let slot = match words.get(3) {
+                        Some(_) => int(3)? as usize,
+                        None => 0,
+                    };
+                    if slot >= MAX_PLAYERS {
+                        return Err(fail("unknown player"));
+                    }
                     if words[0] == "click" {
-                        now[0].mouse = Some((x, y, true));
+                        now[slot].mouse = Some((x, y, true));
                         frames.push(now);
                     }
-                    now[0].mouse = Some((x, y, false));
+                    now[slot].mouse = Some((x, y, false));
                 }
                 word if word.starts_with('p') => {
                     let player: usize = word[1..]
@@ -132,6 +141,12 @@ mod tests {
 
     #[test]
     fn mistakes_name_the_line() {
+        // any slot's mouse: `move X Y slot`, `click X Y slot` (no slot: the host's)
+        let script = Script::parse("move 10 20 2\nwait 1\nclick 5 6 1\nwait 1").expect("parses");
+        assert_eq!(script.input(0, 2).mouse, Some((200, 400, false)));
+        assert_eq!(script.input(1, 1).mouse, Some((100, 120, true)));
+        assert_eq!(script.input(2, 1).mouse, Some((100, 120, false)));
+        assert_eq!(script.input(2, 0).mouse, None);
         let script = Script::parse("p1 KEY1|VIEW|NO\nwait 1").expect("parses");
         assert_eq!(script.input(0, 1).buttons, KEY1 | VIEW | NO);
         let err = Script::parse("wait 1\np0 JUMP").err().expect("an error");

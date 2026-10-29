@@ -196,3 +196,17 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   desktop 100/100. Replay of territory-war-279.swf 800 frames with FIRE/KEY1/VIEW twice: identical (title screen
   only; a match needs the TW session's script). Its onSoundComplete flag only gates a sound: no fingerprint issue.
   Not released.
+- Co-op API for SWFs (request relayed by "Flash game multiplayer mod folders": every Flash game moves onto Ruffle
+  Together; mouse-aimed games need every slot's mouse + the local slot). Design: ExternalInterface, the same in AS2
+  and AS3: coop.players, coop.localSlot, coop.mouseX/mouseY/mouseDown(slot) (stage pixels). coop/api.rs
+  (CoopApi + provider), Stepper installs the provider on the first frame and updates it from each frame's inputs
+  before the frame runs; every PC now sends its mouse (only slot 0 still drives Ruffle's own mouse: _xmouse,
+  stage.mouseX and events stay the host's). Scripts: move/click X Y [slot]. Tests first: API answers; Ruffle's own
+  AS2 + AS3 ExternalInterface test SWFs reach the provider through the Stepper; 3-player session where each PC
+  sends its own mouse -> every PC has identical per-slot values; script slots. RED -> GREEN, 103/103.
+  GM2 4p replay hash unchanged 8e30f66c (GM2 doesn't use EI); GM2 with 4 slots' mice moving/clicking twice
+  identical; BIC twice identical; lab.py (new --exe) with mice: 2p and 4p relay (20 ms lag) and direct in sync
+  (4p direct 60.2 s vs 57.1: another session's 4 Ruffle processes were running). localSlot rule documented: the
+  fingerprint covers every object's position/visibility/depth/frame, so per-PC moves/visibility/objects show OUT
+  OF SYNC; per-PC camera not supported. Built while another session's processes held target/release
+  ruffle_desktop.exe: checks used target/release/deps/ruffle_desktop.exe. Not released.

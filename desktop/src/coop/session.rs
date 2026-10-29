@@ -542,7 +542,7 @@ impl Session {
         Ok(Session {
             link,
             lockstep: Lockstep::new(player_count, your_index, delay),
-            stepper: Stepper::new(opts.game.keys()),
+            stepper: Stepper::new(opts.game.keys(), player_count, your_index),
             game: opts.game,
             local_index: your_index,
             peers,
@@ -619,7 +619,8 @@ impl Session {
         }
         InputFrame {
             buttons: if self.focused { local_buttons(self.game, &self.held) } else { 0 },
-            mouse: if self.local_index == 0 { self.mouse } else { None },
+            // every PC's mouse travels as its slot's mouse; only the host's moves Ruffle's mouse
+            mouse: self.mouse,
         }
     }
 
@@ -1153,6 +1154,44 @@ mod tests {
         let (host_state, _) = host.join().expect("host");
         assert!(host_state.closed.is_some(), "host still waiting");
         assert!(left_at.elapsed() < Duration::from_secs(6));
+    }
+
+    /// Every PC sends its own mouse as its slot's mouse, and every PC sees all of them the same.
+    #[test]
+    fn every_player_sends_their_own_mouse() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let three = |mut o: SessionOpts| {
+            o.players = 3;
+            o.game = Game::GunMayhem2;
+            o.script = Some(
+                Script::parse("move 100 50 0\nmove 200 60 1\nmove 300 70 2\nwait 30\nclick 310 71 2\nwait 30")
+                    .expect("script"),
+            );
+            o
+        };
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(three(opts(Role::HostDirect { port }, &host_swf, 0)), 120, None));
+        thread::sleep(Duration::from_millis(300));
+        let friends: Vec<_> = (0..2)
+            .map(|_| {
+                let swf = swf.clone();
+                thread::sleep(Duration::from_millis(100));
+                thread::spawn(move || {
+                    let addr = format!("127.0.0.1:{port}");
+                    play(three(opts(Role::JoinDirect { addr }, &swf, 0)), 120, None)
+                })
+            })
+            .collect();
+        let mut all = vec![host.join().expect("host")];
+        all.extend(friends.into_iter().map(|f| f.join().expect("friend")));
+        let expected = [(2000, 1000, false), (4000, 1200, false), (6200, 1420, false), (0, 0, false)];
+        for (state, session) in &all {
+            assert_eq!(state.desync_at, None);
+            let api = session.stepper.api().lock().expect("api").clone();
+            assert_eq!(api.mouse, expected, "player {}", session.local_index + 1);
+            assert_eq!(api.local_slot, session.local_index);
+        }
     }
 
     /// A connection that stalls for a while (an internet or relay hiccup) but stays open must not

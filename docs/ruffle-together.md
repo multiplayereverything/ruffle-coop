@@ -39,7 +39,8 @@ The relay needs the `ruffle-coop` game in mods-info first.
   Gun Mayhem 2: Z or T to shoot, X or Y for a grenade. The host is player 1, friends follow in join order.
 - `--coop-players N` (host): start with N players (2-4, as many as the game has keys for); the game starts
   once all have joined. `--coop-keys <game>`: every player must give the same.
-- Only the host's mouse works in the game (menus, level select).
+- Only the host's mouse works in the game's own menus; games built for co-op read every player's mouse (see
+  the co-op API below).
 - `--coop-delay N` (host): a fixed input delay in frames. Without it the host pings the friends when they
   connect and picks the smallest delay that runs smoothly (about 1 frame per 67 ms of ping; with 3-4
   players a friend's keys go through the host, so the two worst pings count together).
@@ -51,6 +52,35 @@ The relay needs the `ruffle-coop` game in mods-info first.
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
   frame rate, time per frame, and how long the game waited for the other PC's keys.
+
+## For game builders: the co-op API (AS2 and AS3)
+
+A game made for Ruffle Together can ask about the players through `ExternalInterface`, the same way in AS2
+(`flash.external.ExternalInterface`) and AS3 (`flash.external.ExternalInterface`):
+
+| Call | Returns |
+|---|---|
+| `ExternalInterface.call("coop.players")` | number of players in the session (2-4) |
+| `ExternalInterface.call("coop.localSlot")` | this PC's player slot (0 = host). **Never for gameplay**, see below |
+| `ExternalInterface.call("coop.mouseX", slot)` | that slot's mouse x, in stage pixels (the same space as `_root._xmouse` / `stage.mouseX`) |
+| `ExternalInterface.call("coop.mouseY", slot)` | that slot's mouse y |
+| `ExternalInterface.call("coop.mouseDown", slot)` | `true` while that slot's left mouse button is down |
+
+- **In co-op or not:** `ExternalInterface.available && ExternalInterface.call("coop.players") > 0`. In plain Ruffle
+  or Flash Player this is false: use the normal mouse and treat this PC as slot 0.
+- Every PC's mouse travels with its keys, so every answer except `localSlot` is the same on every PC for the same
+  frame. A slot whose mouse hasn't moved yet reads (0, 0), up. A slot number outside 0..players-1 returns undefined.
+- **The normal mouse is the host's:** `_xmouse`/`_ymouse`, `stage.mouseX`/`mouseY`, mouse events, buttons and
+  `Mouse` listeners all follow slot 0's mouse on every PC (only the host can click the menus). A game that aims
+  with the mouse for every player reads each slot through the API, slot 0 included.
+- **`localSlot` rule:** it is different on every PC, so nothing the game simulates may depend on it, and it must
+  not move, show/hide, create or remove display objects: the sync check compares every object's position,
+  visibility, depth and frame on every PC, and a difference shows OUT OF SYNC. Safe: the text of a text field that
+  exists on every PC (for example "YOU" over your player), colour/alpha tints, sounds. A camera that follows the
+  local player is not supported (it would also change hit tests).
+- In a session `ExternalInterface.available` is true and every other call returns undefined; there is no
+  JavaScript.
+- Input scripts drive any slot's mouse: `move X Y slot`, `click X Y slot` (the host's when the slot is left out).
 
 ## Testing (no windows, no real keyboard)
 

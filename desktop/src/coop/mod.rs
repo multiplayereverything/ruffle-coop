@@ -1,6 +1,7 @@
 //! Ruffle Together: lockstep online play for local-multiplayer Flash games.
 //! Every PC runs the same game; only inputs travel, and a frame runs once all players' inputs for it are in.
 
+pub mod api;
 pub mod frame;
 pub mod keymap;
 pub mod lockstep;

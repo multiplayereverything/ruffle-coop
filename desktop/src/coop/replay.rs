@@ -48,7 +48,7 @@ impl Replay<'_> {
         )?;
         let mut player = player.lock().map_err(|_| anyhow!("player lock"))?;
 
-        let mut stepper = Stepper::new(self.game.keys());
+        let mut stepper = Stepper::new(self.game.keys(), self.game.max_players(), 0);
         let mut rng = rand::rng();
         let mut prints = Vec::with_capacity(self.frames as usize);
         for frame in 0..self.frames {
