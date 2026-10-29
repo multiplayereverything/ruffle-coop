@@ -222,3 +222,20 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   Spec for game sessions: side-session-notes/.../ruffle-together-api-and-keymaps.md; sent to the mod-folders parent
   (queued) and to Territory War, Smileys War, Stealth Assassin (UA series), Air Battle, Intrusion 1, Intrusion 2,
   Stealth Hunter 2 (queued). Bow Man's reply was NOT delivered (its workspace needs the user's trust approval).
+- Smileys War windows_lab desyncs (both found; headless lab/replay had stayed in sync). Method: replay env hooks
+  COOP_REPLAY_WINDOW=1 (random extra renders + resizes between frames, like a real window) and COOP_REPLAY_AUDIO=1
+  (this PC's audio device): the untouched SmileysWar.swf + k2p2m1.txt diverged at frame 888 (window) and 1115 (audio).
+  1) Window size: core `local_mouse_position` (_xmouse/_ymouse, AS3 mouseX/mouseY) rounds the mouse through device
+  pixels with `stage.view_matrix().a`, so each window size gave a different _xmouse (the game's cursor clip at
+  8040,7040 vs 8044,7034; the V2 List's dragScroll reads _ymouse -> tran_mc tween vs none). Fix: ratio 1 in a
+  session (frame clock set). 2) Audio: event sounds started in a session get a FrameClockSound (start, in offset,
+  loop length x loops): update_sounds and Sound.position / SoundChannel.position follow the frame clock, so
+  onSoundComplete / soundComplete fire at the same frame on every PC (streams still follow the device).
+  NullAudioBackend now gives each sound its own instance handle (it gave all the null handle, so a PC without
+  audio attached every SoundChannel to the first sound). Tests: core session_mouse_is_the_same_in_every_window_size
+  and a_sound_ends_after_its_loops_on_the_frame_clock; desktop sounds_complete_on_the_frame_clock (Ruffle's AVM2
+  soundchannel_soundcomplete SWF, no audio device); both RED with the fix disabled. Smileys War replay: plain =
+  window = audio = both, 2500 frames. Baselines: old test-build exe vs new identical files for BIC (1900 f), GM2 4p
+  (3300 f, sha 8e30f66c) and TW (2000 f). Tests: desktop 109/109, core lib 131/131, SWF suite 4285 ok / 0 failed.
+  windows_lab both modes with the untouched SWF: in sync (no OUT OF SYNC, fingerprints equal) but FAIL on late
+  frames/fps: 8 other sessions' Ruffle processes were running. Not released.

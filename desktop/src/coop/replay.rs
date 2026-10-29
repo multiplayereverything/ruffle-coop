@@ -56,6 +56,20 @@ impl Replay<'_> {
             let inputs: Vec<_> =
                 (0..self.game.max_players() as usize).map(|p| self.script.input(f, p)).collect();
             stepper.step(&mut player, &inputs);
+            if std::env::var("COOP_REPLAY_WINDOW").is_ok() {
+                // what a real window does between frames: extra repaints, a resize now and then
+                for _ in 0..rng.random_range(0..3) {
+                    player.render();
+                }
+                if rng.random_range(0..10) == 0 {
+                    let width = rng.random_range(100..1500);
+                    player.set_viewport_dimensions(ruffle_core::ViewportDimensions {
+                        width,
+                        height: width * 3 / 4,
+                        scale_factor: rng.random_range(1..=2) as f64,
+                    });
+                }
+            }
             prints.push(player.coop_fingerprint());
             if let Ok(at) = std::env::var("COOP_DESCRIBE_AT")
                 && at.split(',').any(|f| f.trim() == frame.to_string())
@@ -98,6 +112,12 @@ pub fn headless_player(
         // what is on stage when that works (Bad Ice-Cream's title screen does), so a renderer
         // that can't draw takes a different path
         .with_renderer(offscreen_renderer(width, height)?);
+    // this PC's audio device instead of none, as in a session window
+    if std::env::var("COOP_REPLAY_AUDIO").is_ok() {
+        builder = builder.with_audio(
+            ruffle_frontend_utils::backends::audio::CpalAudioBackend::new(None).map_err(|e| anyhow!("{e}"))?,
+        );
+    }
     builder = match &clock {
         Some(clock) => builder.with_locale(FrameClockLocale::new(clock.clone())),
         None => builder.with_locale(DefaultLocaleBackend::new()),

@@ -162,6 +162,61 @@ mod tests {
         }
     }
 
+    struct Traces(Arc<Mutex<Vec<String>>>);
+
+    impl ruffle_core::backend::log::LogBackend for Traces {
+        fn avm_trace(&self, message: &str) {
+            self.0.lock().expect("traces").push(message.to_string());
+        }
+
+        fn avm_warning(&self, _message: &str) {}
+    }
+
+    /// The frames at which Ruffle's own AVM2 sound-complete test SWF (two embedded sounds) sees
+    /// each channel's soundComplete, without an audio device (as on a PC without one).
+    fn sound_complete_frames(session: bool) -> Vec<(usize, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/tests/swfs");
+        let movie = ruffle_core::tag_utils::movie_from_path(
+            root.join("avm2/soundchannel_soundcomplete/test.swf"),
+            None,
+        )
+        .expect("test swf");
+        let traces = Arc::new(Mutex::new(vec![]));
+        let player = PlayerBuilder::new()
+            .with_movie(movie)
+            .with_log(Traces(traces.clone()))
+            .with_autoplay(true)
+            .build();
+        let mut player = player.lock().expect("player");
+        if session {
+            player.set_frame_clock(Some(Arc::new(Mutex::new(FrameClock::new(0)))));
+        }
+        let mut stepper = Stepper::new(Game::built_in("bad-ice-cream").expect("built in").keys(), 2, 0);
+        let mut seen = vec![];
+        for frame in 0..300 {
+            stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
+            for line in traces.lock().expect("traces").drain(..) {
+                if line.contains("soundComplete") {
+                    seen.push((frame, line));
+                }
+            }
+        }
+        seen
+    }
+
+    /// A sound's end follows the frame clock in a session, so soundComplete / onSoundComplete
+    /// fire at the same frame on every PC, whatever (or whether) its audio device plays.
+    #[test]
+    fn sounds_complete_on_the_frame_clock() {
+        let seen = sound_complete_frames(true);
+        let channels: Vec<_> = seen.iter().map(|(_, line)| line.split(':').next().unwrap_or("")).collect();
+        assert_eq!(channels, ["noise_channel", "silence_channel"], "{seen:?}");
+        assert_eq!(seen, sound_complete_frames(true), "the same frames every time");
+
+        // control: outside a session a PC without an audio device never ends a sound
+        assert_eq!(sound_complete_frames(false), vec![]);
+    }
+
     /// Streaming loads only part of a movie per frame, as fast as the PC allows; the first
     /// step loads all of it, so every PC starts from the same fully loaded movie.
     #[test]

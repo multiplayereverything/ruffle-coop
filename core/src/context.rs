@@ -304,8 +304,28 @@ impl<'gc> UpdateContext<'gc> {
         owner: Option<DisplayObject<'gc>>,
         avm1_object: Option<Avm1Object<'gc>>,
     ) -> Option<SoundInstanceHandle> {
+        let instance = self.audio_manager.start_sound(
+            self.audio,
+            sound,
+            settings,
+            transform,
+            owner,
+            avm1_object,
+        )?;
+        // Ruffle Together: the sound ends by the frame clock, the same frame on every PC
+        if let Some(now) = self.frame_clock_elapsed
+            && let Some(duration) = self.audio.get_sound_duration(sound)
+        {
+            self.audio_manager
+                .follow_frame_clock(instance, now, duration, settings);
+        }
+        Some(instance)
+    }
+
+    /// The position of a playing sound in ms, `None` once it has ended.
+    pub fn sound_position(&self, instance: SoundInstanceHandle) -> Option<f64> {
         self.audio_manager
-            .start_sound(self.audio, sound, settings, transform, owner, avm1_object)
+            .sound_position(self.audio, instance, self.frame_clock_elapsed)
     }
 
     pub fn attach_avm2_sound_channel(

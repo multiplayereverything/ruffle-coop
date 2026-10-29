@@ -10,7 +10,7 @@ use crate::{
 use gc_arena::Collect;
 pub use ruffle_common::buffer::Substream;
 use ruffle_common::duration::FloatDuration;
-use slotmap::{Key, SlotMap, new_key_type};
+use slotmap::{SlotMap, new_key_type};
 
 #[cfg(feature = "audio")]
 pub mod decoders;
@@ -219,6 +219,9 @@ struct NullSound {
 /// Audio backend that ignores all audio.
 pub struct NullAudioBackend {
     sounds: SlotMap<SoundHandle, NullSound>,
+    /// Every started sound gets its own handle, as with a real audio device (Ruffle Together:
+    /// a PC without one must track its sounds the same way).
+    instances: SlotMap<SoundInstanceHandle, ()>,
     volume: f32,
 }
 
@@ -226,6 +229,7 @@ impl NullAudioBackend {
     pub fn new() -> NullAudioBackend {
         NullAudioBackend {
             sounds: SlotMap::with_key(),
+            instances: SlotMap::with_key(),
             volume: 1.0,
         }
     }
@@ -272,7 +276,7 @@ impl AudioBackend for NullAudioBackend {
         _sound: SoundHandle,
         _sound_info: &swf::SoundInfo,
     ) -> Result<SoundInstanceHandle, DecodeError> {
-        Ok(SoundInstanceHandle::null())
+        Ok(self.instances.insert(()))
     }
 
     fn start_stream(
@@ -280,7 +284,7 @@ impl AudioBackend for NullAudioBackend {
         _clip_data: crate::tag_utils::SwfSlice,
         _handle: &swf::SoundStreamHead,
     ) -> Result<SoundInstanceHandle, DecodeError> {
-        Ok(SoundInstanceHandle::null())
+        Ok(self.instances.insert(()))
     }
 
     fn start_substream(
@@ -288,14 +292,18 @@ impl AudioBackend for NullAudioBackend {
         _stream_data: Substream,
         _handle: &SoundStreamInfo,
     ) -> Result<SoundInstanceHandle, DecodeError> {
-        Ok(SoundInstanceHandle::null())
+        Ok(self.instances.insert(()))
     }
 
-    fn stop_sound(&mut self, _sound: SoundInstanceHandle) {}
+    fn stop_sound(&mut self, sound: SoundInstanceHandle) {
+        self.instances.remove(sound);
+    }
 
-    fn stop_all_sounds(&mut self) {}
-    fn get_sound_position(&self, _instance: SoundInstanceHandle) -> Option<f64> {
-        Some(0.0)
+    fn stop_all_sounds(&mut self) {
+        self.instances.clear();
+    }
+    fn get_sound_position(&self, instance: SoundInstanceHandle) -> Option<f64> {
+        self.instances.contains_key(instance).then_some(0.0)
     }
     fn get_sound_duration(&self, sound: SoundHandle) -> Option<FloatDuration> {
         if let Some(sound) = self.sounds.get(sound) {
@@ -396,8 +404,13 @@ impl<'gc> AudioManager<'gc> {
         let mut event_targets = Vec::new();
 
         // Update the position of sounds, and remove any completed sounds.
+        let now = context.frame_clock_elapsed;
         context.audio_manager.sounds.retain(|sound| {
-            if let Some(pos) = context.audio.get_sound_position(sound.instance) {
+            let position = match (sound.frame_clock, now) {
+                (Some(clock), Some(now)) => clock.position(now),
+                _ => context.audio.get_sound_position(sound.instance),
+            };
+            if let Some(pos) = position {
                 // Sounds still playing; update position for AVM1 sounds.
                 // AVM2 sounds do not update position and instead grab the position on demand.
 
@@ -475,6 +488,7 @@ impl<'gc> AudioManager<'gc> {
                 avm1_object,
                 avm2_object: None,
                 stream_start_frame: None,
+                frame_clock: None,
             };
 
             if let Some(transform) = transform {
@@ -587,6 +601,39 @@ impl<'gc> AudioManager<'gc> {
         self.sounds.iter().any(|other| other.sound == Some(sound))
     }
 
+    /// Ruffle Together: `instance` (just started at frame clock time `now`) plays by the frame
+    /// clock from now on: see `FrameClockSound`.
+    pub fn follow_frame_clock(
+        &mut self,
+        instance: SoundInstanceHandle,
+        now: Duration,
+        duration: FloatDuration,
+        settings: &swf::SoundInfo,
+    ) {
+        if let Some(sound) = self.sounds.iter_mut().find(|other| other.instance == instance) {
+            sound.frame_clock = Some(FrameClockSound::new(now, duration, settings));
+        }
+    }
+
+    /// The position of a playing sound in ms (`None` once it has ended): by the frame clock for a
+    /// sound that follows it (`now` is the frame clock time), else as the audio device says.
+    pub fn sound_position(
+        &self,
+        audio: &dyn AudioBackend,
+        instance: SoundInstanceHandle,
+        now: Option<Duration>,
+    ) -> Option<f64> {
+        let clock = self
+            .sounds
+            .iter()
+            .find(|other| other.instance == instance)
+            .and_then(|sound| sound.frame_clock);
+        match (clock, now) {
+            (Some(clock), Some(now)) => clock.position(now),
+            _ => audio.get_sound_position(instance),
+        }
+    }
+
     pub fn start_stream(
         &mut self,
         audio: &mut dyn AudioBackend,
@@ -605,6 +652,7 @@ impl<'gc> AudioManager<'gc> {
                 avm1_object: None,
                 avm2_object: None,
                 stream_start_frame: Some(clip_frame),
+                frame_clock: None,
             };
             audio.set_sound_transform(handle, self.transform_for_sound(&instance));
             self.sounds.push(instance);
@@ -631,6 +679,7 @@ impl<'gc> AudioManager<'gc> {
                 avm1_object: None,
                 avm2_object: None,
                 stream_start_frame: None,
+                frame_clock: None,
             };
             audio.set_sound_transform(handle, self.transform_for_sound(&instance));
             self.sounds.push(instance);
@@ -872,6 +921,49 @@ pub struct SoundInstance<'gc> {
     avm2_object: Option<SoundChannelObject<'gc>>,
 
     stream_start_frame: Option<u16>,
+
+    /// Ruffle Together: when this sound plays by the frame clock, not the audio device.
+    #[collect(require_static)]
+    frame_clock: Option<FrameClockSound>,
+}
+
+/// Ruffle Together: an event sound's timing counted on the frame clock, so it ends (and fires
+/// `onSoundComplete` / `soundComplete`) at the same frame on every PC, whatever the PC's audio
+/// device does.
+#[derive(Clone, Copy, Debug)]
+struct FrameClockSound {
+    /// Frame clock time when the sound started.
+    started: Duration,
+    /// Where each loop starts in the sound, ms.
+    in_ms: f64,
+    /// The length of one loop, ms.
+    loop_ms: f64,
+    /// The length of every loop together, ms.
+    total_ms: f64,
+}
+
+impl FrameClockSound {
+    fn new(started: Duration, duration: FloatDuration, settings: &swf::SoundInfo) -> Self {
+        let sample_ms = |sample: u32| f64::from(sample) / 44.1;
+        let in_ms = settings.in_sample.map_or(0.0, sample_ms);
+        let out_ms = settings.out_sample.map_or(duration.as_millis(), sample_ms);
+        let loop_ms = (out_ms - in_ms).max(0.0);
+        Self {
+            started,
+            in_ms,
+            loop_ms,
+            total_ms: loop_ms * f64::from(settings.num_loops.max(1)),
+        }
+    }
+
+    /// The position in the sound at frame clock time `now` (ms), or `None` once it has ended.
+    fn position(&self, now: Duration) -> Option<f64> {
+        let elapsed = now.saturating_sub(self.started).as_secs_f64() * 1000.0;
+        if elapsed >= self.total_ms {
+            return None;
+        }
+        Some(self.in_ms + elapsed % self.loop_ms)
+    }
 }
 
 /// A sound transform for a playing sound, for use by audio backends.
@@ -908,5 +1000,37 @@ impl Default for SoundTransform {
             right_to_left: 0.0,
             right_to_right: 1.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_clock_tests {
+    use super::*;
+
+    fn info(in_sample: Option<u32>, num_loops: u16) -> swf::SoundInfo {
+        swf::SoundInfo {
+            event: swf::SoundEvent::Start,
+            in_sample,
+            out_sample: None,
+            num_loops,
+            envelope: None,
+        }
+    }
+
+    /// A 500 ms sound started at 1 s, from 100 ms in (44100 samples per second), twice.
+    #[test]
+    fn a_sound_ends_after_its_loops_on_the_frame_clock() {
+        let ms = Duration::from_millis;
+        let sound = FrameClockSound::new(ms(1000), FloatDuration::from_millis(500.0), &info(Some(4410), 2));
+        assert_eq!(sound.position(ms(1000)), Some(100.0));
+        assert_eq!(sound.position(ms(1300)), Some(400.0));
+        assert_eq!(sound.position(ms(1400)), Some(100.0), "second loop starts at the start offset");
+        assert_eq!(sound.position(ms(1799)), Some(499.0));
+        assert_eq!(sound.position(ms(1800)), None, "two loops of 400 ms");
+
+        // no loops given plays once
+        let once = FrameClockSound::new(ms(0), FloatDuration::from_millis(500.0), &info(None, 0));
+        assert_eq!(once.position(ms(499)), Some(499.0));
+        assert_eq!(once.position(ms(500)), None);
     }
 }
