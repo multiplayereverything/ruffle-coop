@@ -102,6 +102,13 @@ impl Stepper {
         self.api.lock().is_ok_and(|api| api.wants_text())
     }
 
+    /// The host's game settings, for `coop.option`.
+    pub fn set_options(&mut self, options: &[(String, String)]) {
+        if let Ok(mut api) = self.api.lock() {
+            api.options = options.to_vec();
+        }
+    }
+
     /// Every player's name, for `coop.name`.
     pub fn set_names(&mut self, names: &[String]) {
         if let Ok(mut api) = self.api.lock() {

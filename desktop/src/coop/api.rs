@@ -7,6 +7,8 @@
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
+//! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
+//! ExternalInterface.call("coop.options")         every setting, as an object
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
@@ -31,7 +33,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options"];
 
 /// A game that called `coop.typed` within this many frames gets every typed character.
 const WANTS_TEXT_FRAMES: u32 = 60;
@@ -59,6 +61,8 @@ pub struct CoopApi {
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
+    /// The host's game settings, the same on every PC.
+    pub options: Vec<(String, String)>,
     /// Each slot's typed characters this frame.
     pub typed: [crate::coop::lockstep::Typed; MAX_PLAYERS],
     /// Frames run, and the frame the game last read `coop.typed`.
@@ -84,6 +88,7 @@ impl CoopApi {
             mouse: [(0, 0, false); MAX_PLAYERS],
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
+            options: vec![],
             frame: 0,
             typed_read_at: None,
             names: vec![],
@@ -153,6 +158,12 @@ impl CoopApi {
                     .collect();
                 Value::String(text)
             }
+            ("coop.option", _) => text(0)
+                .and_then(|name| self.options.iter().find(|(n, _)| *n == name))
+                .map_or(Value::Undefined, |(_, value)| Value::String(value.clone())),
+            ("coop.options", _) => Value::Object(
+                self.options.iter().map(|(n, v)| (n.clone(), Value::String(v.clone()))).collect(),
+            ),
             ("coop.buttons", Some(slot)) => Value::Number(self.buttons[slot].into()),
             ("coop.button", Some(slot)) => match text(1).and_then(|name| crate::coop::lockstep::button_named(&name)) {
                 Some(button) => Value::Bool(self.buttons[slot] & button != 0),
@@ -320,6 +331,18 @@ mod tests {
             api.update(&[InputFrame::default(), InputFrame::default()]);
         }
         assert!(!api.wants_text(), "not read for a while");
+    }
+
+    #[test]
+    fn the_hosts_options() {
+        let mut api = CoopApi::new(2, 1);
+        api.options = vec![("map".into(), "3".into()), ("mode".into(), "team play".into())];
+        assert_eq!(api.answer("coop.option", &[s("map")]), s("3"));
+        assert_eq!(api.answer("coop.option", &[s("mode")]), s("team play"));
+        assert_eq!(api.answer("coop.option", &[s("lives")]), Value::Undefined);
+        let Value::Object(all) = api.answer("coop.options", &[]) else { panic!("an object") };
+        assert_eq!(all.get("map"), Some(&s("3")));
+        assert_eq!(all.len(), 2);
     }
 
     #[test]

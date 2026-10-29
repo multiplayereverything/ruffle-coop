@@ -24,6 +24,8 @@ pub enum Msg {
         save: Vec<u8>,
         /// Every player in slot order (the host first): their Hello id and name.
         players: Vec<(u64, String)>,
+        /// The host's game settings (`coop.option`).
+        options: Vec<(String, String)>,
     },
     Input {
         player: u8,
@@ -71,13 +73,21 @@ pub fn encode(msg: &Msg) -> String {
             frame_rate_milli,
             save,
             players,
+            options,
         } => {
             let hex: String = save.iter().map(|b| format!("{b:02x}")).collect();
+            let options: String = options
+                .iter()
+                .map(|(name, value)| format!("{name}={value}\n"))
+                .collect::<String>()
+                .bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             let players: Vec<String> = players
                 .iter()
                 .map(|(id, name)| format!("{id:x}:{}", clean(name).replace(',', " ")))
                 .collect();
-            format!("ST|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}|{}", players.join(","))
+            format!("ST|{delay}|{start_unix_ms}|{frame_rate_milli}|{hex}|{}|{options}", players.join(","))
         }
         Msg::Input {
             player,
@@ -106,6 +116,13 @@ pub fn encode(msg: &Msg) -> String {
     }
 }
 
+fn unhex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
 pub fn decode(line: &str) -> Result<Msg, String> {
     let parts: Vec<&str> = line.split('|').collect();
     let bad = || format!("bad message: {line:.80}");
@@ -132,7 +149,7 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             })
         }
         "ST" => {
-            want(6)?;
+            want(7)?;
             let hex = parts[4];
             if !hex.len().is_multiple_of(2) {
                 return Err(bad());
@@ -151,12 +168,20 @@ pub fn decode(line: &str) -> Result<Msg, String> {
                 .collect::<Option<Vec<_>>>()
                 .filter(|players| (1..=crate::coop::lockstep::MAX_PLAYERS).contains(&players.len()))
                 .ok_or_else(bad)?;
+            let options = unhex(parts[6]).ok_or_else(bad)?;
+            let options = String::from_utf8(options).map_err(|_| bad())?;
+            let options = options
+                .lines()
+                .map(|line| line.split_once('=').map(|(n, v)| (n.to_string(), v.to_string())))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(bad)?;
             Ok(Msg::Start {
                 delay: uint(1)?,
                 start_unix_ms: num(2)?,
                 frame_rate_milli: uint(3)?,
                 save,
                 players,
+                options,
             })
         }
         "IN" => {
@@ -251,6 +276,7 @@ mod tests {
             frame_rate_milli: 25_000,
             save: vec![0, 1, 254, 255],
             players: vec![(0, "Liam".into()), (77, "Sam".into())],
+            options: vec![("map".into(), "3".into()), ("note".into(), "a|b=c,d".into())],
         });
         roundtrip(Msg::Start {
             delay: 0,
@@ -258,6 +284,7 @@ mod tests {
             frame_rate_milli: 30_000,
             save: vec![],
             players: vec![(0, String::new()), (1, "a:b".into()), (2, "c".into()), (3, "d".into())],
+            options: vec![],
         });
         roundtrip(Msg::Input {
             player: 1,
@@ -332,6 +359,7 @@ mod tests {
             frame_rate_milli: 0,
             save: vec![],
             players: vec![(0, "x,y".into())],
+            options: vec![],
         });
         assert!(matches!(decode(&line), Ok(Msg::Start { players, .. }) if players == vec![(0, "x y".into())]));
     }

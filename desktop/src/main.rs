@@ -252,6 +252,7 @@ fn main() -> Result<(), Error> {
             players: coop.players()?,
             save_dir: Some(preferences.cli.save_directory.clone()),
             script,
+            options: coop.options()?,
             host_wait: None,
             start_skew_ms: 0,
             paced: true,

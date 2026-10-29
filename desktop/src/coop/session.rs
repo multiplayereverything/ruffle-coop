@@ -58,6 +58,8 @@ pub struct SessionOpts {
     pub save_dir: Option<PathBuf>,
     /// Testing: input from a script instead of the keyboard and mouse.
     pub script: Option<Script>,
+    /// Host: game settings every player gets (`coop.option`); a friend's are ignored.
+    pub options: Vec<(String, String)>,
     /// How long the host waits for a friend (None: until the window closes).
     pub host_wait: Option<Duration>,
     /// Testing: shift this PC's start date, to force a desync.
@@ -573,6 +575,7 @@ impl Session {
                 frame_rate_milli: 0,
                 save,
                 players,
+                options: opts.options.clone(),
             };
             link.send(&me);
             link.send(&start);
@@ -605,7 +608,7 @@ impl Session {
             }
         };
 
-        let Msg::Start { delay, start_unix_ms, save, players, .. } = start else {
+        let Msg::Start { delay, start_unix_ms, save, players, options, .. } = start else {
             unreachable!("start is always a Start message");
         };
         let player_count = players.len() as u8;
@@ -616,6 +619,7 @@ impl Session {
         let names: Vec<String> = players.into_iter().map(|(_, name)| name).collect();
         let mut stepper = Stepper::new(opts.game.keys(), player_count, your_index);
         stepper.set_names(&names);
+        stepper.set_options(&options);
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
         tracing::info!(
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
@@ -1056,6 +1060,7 @@ impl Drop for Session {
 mod tests {
     use super::*;
     use crate::coop::replay::headless_player;
+    use ruffle_core::external::Value;
     use std::net::TcpListener;
     use std::thread;
 
@@ -1095,6 +1100,7 @@ mod tests {
             swf: swf.to_path_buf(),
             game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
+            options: vec![],
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,
@@ -1171,6 +1177,32 @@ mod tests {
         // the same game on both PCs, checked every 25 frames (frames 24, 49, ... 974 are check frames)
         assert_eq!(host_session.print_at(974), join_session.print_at(974));
         assert!(host_session.print_at(974).is_some());
+    }
+
+    /// The host's `--coop-option`s reach every player's `coop.option`; a friend's own are ignored.
+    #[test]
+    fn every_player_gets_the_hosts_options() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || {
+            let mut opts = opts(Role::HostDirect { port }, &host_swf, 0);
+            opts.options = vec![("map".into(), "3".into()), ("mode".into(), "team".into())];
+            play(opts, 30, None)
+        });
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(move || {
+            let mut opts = opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0);
+            opts.options = vec![("map".into(), "9".into())];
+            play(opts, 30, None)
+        });
+        let (_, host_session) = host.join().expect("host");
+        let (_, join_session) = join.join().expect("join");
+        for session in [&host_session, &join_session] {
+            let mut api = session.stepper.api().lock().expect("api");
+            assert_eq!(api.answer("coop.option", &[Value::String("map".into())]), Value::String("3".into()));
+            assert_eq!(api.answer("coop.option", &[Value::String("mode".into())]), Value::String("team".into()));
+        }
     }
 
     /// Measured in the lab (tools/coop-lab/lab.py, relay with lag): a delay of d frames runs
