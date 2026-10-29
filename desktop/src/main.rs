@@ -173,7 +173,8 @@ fn main() -> Result<(), Error> {
     let mut preferences = GlobalPreferences::load(opt)?;
 
     let logs_path = &preferences.cli.cache_directory.join("log");
-    let log_path = preferences.log_filename_pattern().create_path(logs_path);
+    let headless = preferences.cli.coop.coop_headless;
+    let log_path = log::log_path(preferences.log_filename_pattern(), logs_path, headless);
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -183,7 +184,7 @@ fn main() -> Result<(), Error> {
 
     // [NA] `_guard` cannot be `_` or it'll immediately drop
     // https://docs.rs/tracing-appender/latest/tracing_appender/non_blocking/index.html
-    if preferences.log_filename_pattern() == log::FilenamePattern::SingleFile {
+    if preferences.log_filename_pattern() == log::FilenamePattern::SingleFile && !headless {
         log::keep_old_logs(&log_path, log::OLD_LOGS);
     }
     let (non_blocking_file, _file_guard) = tracing_appender::non_blocking(File::create(log_path)?);
