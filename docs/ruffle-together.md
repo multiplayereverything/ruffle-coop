@@ -1,6 +1,6 @@
 # Ruffle Together
 
-Version 1.0.3.5 (build id `rc-1.0.3.5#<commit>`; players must use the same build).
+Version 1.0.3.6 (build id `rc-1.0.3.6#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with up to 3 friends. Every PC runs the same game in this Ruffle
 build; only the key presses travel, and every frame runs on every PC with every player's keys. Everyone gets
@@ -29,8 +29,8 @@ ruffle_desktop --coop-join <host IP>:7801 --coop-name Sam BadIceCream_coop.swf
 Through the central relay with a room code (no IP needed):
 
 ```
-ruffle_desktop --coop-host-relay 195.60.166.57:25569 BadIceCream_coop.swf      (prints the room code)
-ruffle_desktop --coop-join-relay 195.60.166.57:25569 --coop-code ABCDE BadIceCream_coop.swf
+ruffle_desktop --coop-host-relay 165.232.82.11:25569 BadIceCream_coop.swf      (prints the room code)
+ruffle_desktop --coop-join-relay 165.232.82.11:25569 --coop-code ABCDE BadIceCream_coop.swf
 ```
 
 The relay needs the `ruffle-coop` game in mods-info first.
@@ -44,10 +44,18 @@ The relay needs the `ruffle-coop` game in mods-info first.
 - `--coop-delay N` (host): a fixed input delay in frames. Without it the host pings the friends when they
   connect and picks the smallest delay that runs smoothly (about 1 frame per 67 ms of ping; with 3-4
   players a friend's keys go through the host, so the two worst pings count together).
-- While everyone joins, the window shows the room code (or the port), who has joined, or why it can't start.
+- While everyone joins, every window (the friends' too) shows the room code (or the port), who has joined and how
+  many the game needs, or why it can't start. Friends who join early wait as long as the last one takes.
   During the game the window title shows the room code, your player number, and "waiting for…", "… left" or
   "OUT OF SYNC".
-- Everyone plays with the host's save (unlocked levels); nobody's own save changes.
+- Saves: everyone starts from the host's co-op save for this game (its solo save the first time), so every PC
+  has the same unlocked levels. Whenever the game saves, every PC writes the session's saves to its own co-op
+  save, `%LOCALAPPDATA%\ruffle\SharedObjects\coop\<game file>.save` (under `--save-directory` if given), so any
+  player can host next time and carry on. Solo saves are never changed. Delete the file to start the co-op game
+  over. Once the games are OUT OF SYNC nothing more is saved.
+- `--coop-save coop|solo|new` (host): which save everyone starts from. `coop` (the default) is the co-op save
+  as above; `solo` is the host's solo save even if it has a co-op one; `new` starts the game as if new. With
+  `solo` or `new` the host's co-op save is replaced the first time the game saves (each friend's too).
 - One Ruffle window at a time: opening another game closes the one still open (per cache folder; give each
   window its own `--cache-directory` to run several on one PC, as the labs do).
 - Every 5 seconds the log (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) gets a "Ruffle Together timing" line:
@@ -74,7 +82,7 @@ local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=90,84 ALT=88,89
 - `slot N:` (0-3, in order): what that player's buttons press in the game, as Flash key codes. The number of
   slots is how many players the game can have.
 - `local:`: the keys a player presses on their own PC for each button (key codes; several per button).
-- Buttons: UP DOWN LEFT RIGHT FIRE ALT KEY1 KEY2 KEY3 KEY4 VIEW QUIT YES NO (the same names as in input scripts).
+- Buttons: UP DOWN LEFT RIGHT FIRE ALT KEY1 KEY2 KEY3 KEY4 VIEW QUIT YES NO MENU (the same names as in input scripts).
 - Key codes: letters 65-90, digits 48-57, numpad 0-9 96-105 and * + - . / 106/107/109/110/111 (sent with the
   numpad location), Space 32, arrows 37-40, Enter 13, Shift 16, Ctrl 17, Alt 18, Esc 27, Backspace 8, Tab 9,
   PageUp/Down 33/34, End/Home 35/36, Insert/Delete 45/46, ; = , - . / ` [ \ ] ' 186-192 and 219-222.

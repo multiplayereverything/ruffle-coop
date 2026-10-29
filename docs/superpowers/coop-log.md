@@ -266,3 +266,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   TW 2p 3000 frames ad6fe22d, zip SHA-256 bf527367...e0ea, latest, re-downloaded hash matches, exe reports
   b3f0766. Live relay (room TVCBY) with the release exe: 750 frames in sync both, 101 ms median. mods-info
   4e6077d. GitHub README (master 2a1d7fb) now describes Ruffle Together.
+
+## 2026-10-29 (relay move)
+- The "waiting for host" stalls were the relay host, not Ruffle Together: relay 1.2's logs on Kinetic
+  (195.60.166.57) showed both clients' traffic stopping at about 71 s and a reset at 122 s; the same relay locally
+  and a direct connection ran for minutes. The relay now runs on DigitalOcean Amsterdam, 165.232.82.11:25569
+  (droplet `mods-relay`, systemd `mods-relay`): two Stealth Hunter 2 windows ran 7 min with no drop (user: smooth).
+  mods-info servers.json points there (8c79139); Kinetic stays up for older clients.

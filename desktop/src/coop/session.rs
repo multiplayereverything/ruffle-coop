@@ -7,7 +7,7 @@ use crate::coop::lockstep::{InputFrame, Lockstep};
 use crate::coop::net::{Event, Link, LinkSender, NO_GOODBYE, Role, connect};
 use crate::coop::protocol::Msg;
 use crate::coop::script::Script;
-use crate::coop::storage::SessionStorage;
+use crate::coop::storage::{SaveGate, SaveStart, SessionStorage, coop_save_file};
 use anyhow::{Result, anyhow, bail};
 use ruffle_core::Player;
 use ruffle_core::events::PhysicalKey;
@@ -35,9 +35,14 @@ const EXPLAIN_STALL: Duration = Duration::from_secs(5);
 const SLOW_FRAME: Duration = Duration::from_secs(2);
 /// The heartbeat's period; a player heard from within 3 of them still has Ruffle running.
 const HEARTBEAT: Duration = Duration::from_secs(1);
+/// Before the start the host tells the waiting friends who has joined this often, so a friend who
+/// joined early keeps waiting however long the last one takes.
+const LOBBY_EVERY: Duration = Duration::from_secs(2);
+/// A friend that hears nothing at all from the host for this long before the start gives up.
+const HOST_SILENT: Duration = if cfg!(test) { Duration::from_secs(5) } else { Duration::from_secs(30) };
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
-pub const VERSION: &str = "1.0.3.5";
+pub const VERSION: &str = "1.0.3.6";
 
 /// This build, as the relay and the other players see it: a different build is refused.
 pub fn build_id() -> String {
@@ -56,6 +61,8 @@ pub struct SessionOpts {
     pub game: Game,
     /// Ruffle's save folder: the host shares its saves for this game.
     pub save_dir: Option<PathBuf>,
+    /// Host: which save the game starts from.
+    pub save_start: SaveStart,
     /// Testing: input from a script instead of the keyboard and mouse.
     pub script: Option<Script>,
     /// How long the host waits for a friend (None: until the window closes).
@@ -125,6 +132,8 @@ pub struct Session {
     room: Option<String>,
     clock: Arc<Mutex<FrameClock>>,
     storage: Option<SessionStorage>,
+    /// Freezes this PC's co-op save once the games are out of sync.
+    save_gate: Option<SaveGate>,
     script: Option<Script>,
     /// How many local inputs were sent (the next one is for frame `delay + local_sent`).
     local_sent: u32,
@@ -505,10 +514,18 @@ impl Session {
             let deadline = opts.host_wait.map(|wait| Instant::now() + wait);
             // accepted friends in join order: connection, Hello id, name
             let mut friends: Vec<(u8, u64, String)> = vec![];
+            let mut told: Option<(Instant, Vec<String>)> = None;
             while friends.len() + 1 < opts.players as usize {
                 let mut names = vec![opts.name.clone()];
                 names.extend(friends.iter().map(|(_, _, name)| name.clone()));
                 update_lobby(&|lobby| lobby.players = names.clone());
+                if told.as_ref().is_none_or(|(at, was)| at.elapsed() >= LOBBY_EVERY || *was != names) {
+                    link.send(&Msg::Lobby {
+                        needed: opts.players,
+                        players: names.clone(),
+                    });
+                    told = Some((Instant::now(), names));
+                }
                 let left = deadline.map_or(Duration::from_secs(3600), |d| {
                     d.saturating_duration_since(Instant::now())
                 });
@@ -534,9 +551,10 @@ impl Session {
                 }
             }
             let save = match &opts.save_dir {
-                Some(dir) => SessionStorage::export_from_disk(
+                Some(dir) => SessionStorage::export_for_session(
                     dir,
                     &opts.swf.file_name().unwrap_or_default().to_string_lossy(),
+                    opts.save_start,
                 ),
                 None => vec![],
             };
@@ -580,8 +598,14 @@ impl Session {
         } else {
             link.send(&me);
             loop {
-                match next_event(&link, Duration::from_secs(30)) {
+                match next_event(&link, HOST_SILENT) {
                     Some(Event::Msg { msg: Msg::Refuse { id, reason }, .. }) if id == my_id => bail!("{reason}"),
+                    Some(Event::Msg { msg: Msg::Lobby { needed, players }, .. }) => {
+                        update_lobby(&|lobby| {
+                            lobby.needed = needed;
+                            lobby.players = players.clone();
+                        });
+                    }
                     // only the host's Hello (id 0) is checked: the host passes the other friends' on
                     Some(Event::Msg {
                         msg: Msg::Hello { build: b, swf_sha256: s, settings: o, id: 0, .. },
@@ -615,6 +639,15 @@ impl Session {
         let mut stepper = Stepper::new(opts.game.keys(), player_count, your_index);
         stepper.set_names(&names);
         let storage = SessionStorage::from_bytes(&save).ok_or_else(|| anyhow!("bad save data"))?;
+        // every PC keeps what the game saves in its own co-op save for this game
+        let (storage, save_gate) = match &opts.save_dir {
+            Some(dir) => {
+                let file = coop_save_file(dir, &opts.swf.file_name().unwrap_or_default().to_string_lossy());
+                let (storage, gate) = storage.with_coop_save(file);
+                (storage, Some(gate))
+            }
+            None => (storage, None),
+        };
         tracing::info!(
             "Ruffle Together: playing as player {} of {player_count}, input delay {delay} frames",
             your_index + 1
@@ -638,6 +671,7 @@ impl Session {
             room,
             clock: Arc::new(Mutex::new(FrameClock::new(start_unix_ms + opts.start_skew_ms))),
             storage: Some(storage),
+            save_gate,
             script: opts.script,
             local_sent: 0,
             held: HashSet::new(),
@@ -898,6 +932,9 @@ impl Session {
         if differs && self.state.desync_at.is_none_or(|at| frame < at) {
             self.state.desync_at = Some(frame);
             tracing::error!("Ruffle Together: the games are out of sync at frame {frame}");
+            if let Some(gate) = &self.save_gate {
+                gate.freeze();
+            }
             self.write_desync_report(frame);
         }
     }
@@ -1035,6 +1072,8 @@ mod tests {
     use super::*;
     use crate::coop::replay::headless_player;
     use std::net::TcpListener;
+    use ruffle_core::backend::storage::StorageBackend;
+    use std::fs;
     use std::thread;
 
     fn free_port() -> u16 {
@@ -1073,6 +1112,7 @@ mod tests {
             swf: swf.to_path_buf(),
             game: Game::built_in("bad-ice-cream").expect("built in"),
             save_dir: None,
+            save_start: SaveStart::Coop,
             script: Some(script()),
             host_wait: Some(Duration::from_secs(20)),
             start_skew_ms,
@@ -1118,7 +1158,7 @@ mod tests {
 
     #[test]
     fn build_id_names_this_release() {
-        assert!(build_id().starts_with("rc-1.0.3.5#"), "{}", build_id());
+        assert!(build_id().starts_with("rc-1.0.3.6#"), "{}", build_id());
         // the relay keeps 32 characters of a version
         assert!(build_id().len() <= 32);
     }
@@ -1153,6 +1193,56 @@ mod tests {
 
     /// Measured in the lab (tools/coop-lab/lab.py, relay with lag): a delay of d frames runs
     /// clean while the ping stays under 2d frames minus ~15 ms of jitter room.
+    /// Every PC keeps the session's saves in its own co-op save, the same bytes on each (each PC
+    /// keeps the game in a different folder), and the solo save is left alone.
+    #[test]
+    fn every_pc_keeps_the_same_coop_save() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let name = swf.file_name().expect("file name").to_string_lossy().to_string();
+        let dirs = [tempfile::tempdir().expect("temp dir"), tempfile::tempdir().expect("temp dir")];
+        let run = |mut o: SessionOpts, dir: PathBuf, folder: &'static str| {
+            o.save_dir = Some(dir);
+            let name = name.clone();
+            move || {
+                let swf = o.swf.clone();
+                let mut session = Session::start(o).expect("session");
+                let player = headless_player(&swf, Some(session.clock()), session.take_storage()).expect("player");
+                let mut player = player.lock().expect("player");
+                while session.frame() < 300 && session.tick(&mut player).closed.is_none() {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                // what SharedObject.flush does, from where this PC keeps the game
+                player.storage_mut().put(&format!("localhost/{folder}/{name}/so_progress"), &[1, 2, 3]);
+                session.frame()
+            }
+        };
+        let host = thread::spawn(run(
+            opts(Role::HostDirect { port }, &swf, 0),
+            dirs[0].path().to_path_buf(),
+            "Users/host/games",
+        ));
+        thread::sleep(Duration::from_millis(300));
+        let join = thread::spawn(run(
+            opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0),
+            dirs[1].path().to_path_buf(),
+            "Downloads",
+        ));
+        assert!(host.join().expect("host") >= 300 && join.join().expect("join") >= 300, "both played");
+        let saves: Vec<Vec<u8>> = dirs
+            .iter()
+            .map(|dir| fs::read(coop_save_file(dir.path(), &name)).expect("a co-op save on every PC"))
+            .collect();
+        assert_eq!(saves[0], saves[1], "the same save on both PCs");
+        let next = SessionStorage::from_bytes(&SessionStorage::export_for_session(dirs[1].path(), &name, SaveStart::Coop))
+            .expect("valid save");
+        assert_eq!(next.get(&format!("localhost/elsewhere/{name}/so_progress")), Some(vec![1, 2, 3]), "a friend can host next");
+        for dir in &dirs {
+            let entries: Vec<_> = fs::read_dir(dir.path()).expect("read dir").flatten().map(|e| e.file_name()).collect();
+            assert_eq!(entries, vec![std::ffi::OsString::from("coop")], "no solo save was written");
+        }
+    }
+
     #[test]
     fn delay_is_picked_from_the_ping() {
         let frame = Duration::from_secs_f64(1.0 / 30.0);
@@ -1478,6 +1568,47 @@ mod tests {
             assert_eq!(state.desync_at, None);
             assert_eq!(state.closed, None);
             assert_eq!(&session.my_prints, host_prints, "player {}", session.local_index + 1);
+        }
+    }
+
+    /// A friend who joins first waits as long as the last one takes (it used to give up after
+    /// 30 s of silence from the host), and sees who is in while it waits.
+    #[test]
+    fn an_early_friend_waits_for_the_last_one_and_sees_who_is_in() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let three = |mut o: SessionOpts| {
+            o.players = 3;
+            o.game = Game::built_in("gun-mayhem-2").expect("built in");
+            o
+        };
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(three(opts(Role::HostDirect { port }, &host_swf, 0)), 100, None));
+        thread::sleep(Duration::from_millis(300));
+        let lobby = Arc::new(Mutex::new(crate::coop::Lobby::default()));
+        let early = {
+            let (swf, lobby) = (swf.clone(), lobby.clone());
+            thread::spawn(move || {
+                let mut o = three(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0));
+                o.lobby = Some(lobby);
+                play(o, 100, None)
+            })
+        };
+        thread::sleep(Duration::from_secs(3));
+        {
+            let lobby = lobby.lock().expect("lobby");
+            assert_eq!(lobby.needed, 3, "the friend hears how many the game needs");
+            assert_eq!(lobby.players.len(), 2, "and who is in: {:?}", lobby.players);
+        }
+        // the last friend comes well after the friend's silence limit
+        thread::sleep(HOST_SILENT + Duration::from_secs(3));
+        let late = thread::spawn(move || {
+            play(three(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0)), 100, None)
+        });
+        for (name, pc) in [("host", host), ("early friend", early), ("late friend", late)] {
+            let (state, session) = pc.join().expect(name);
+            assert_eq!(state.closed, None, "{name}");
+            assert!(session.frame() >= 100, "{name} played");
         }
     }
 

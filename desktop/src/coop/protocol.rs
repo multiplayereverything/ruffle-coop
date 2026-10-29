@@ -41,6 +41,9 @@ pub enum Msg {
     /// Sent every second by a thread of its own, whatever the game does: the player's Ruffle is
     /// running, and its game is at `frame` (a frozen game keeps sending the same frame).
     Alive { player: u8, frame: u32 },
+    /// Host to everyone before the start, every couple of seconds: who has joined so far (the host
+    /// first) and how many the game starts with. It also tells a waiting friend the host is there.
+    Lobby { needed: u8, players: Vec<String> },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -99,6 +102,10 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Ping { seq } => format!("PI|{seq}"),
         Msg::Pong { seq } => format!("PO|{seq}"),
         Msg::Alive { player, frame } => format!("AL|{player}|{frame}"),
+        Msg::Lobby { needed, players } => {
+            let players: Vec<String> = players.iter().map(|name| clean(name).replace(',', " ")).collect();
+            format!("LB|{needed}|{}", players.join(","))
+        }
     }
 }
 
@@ -208,6 +215,17 @@ pub fn decode(line: &str) -> Result<Msg, String> {
                 frame: uint(2)?,
             })
         }
+        "LB" => {
+            want(3)?;
+            let players: Vec<String> = parts[2].split(',').map(str::to_string).collect();
+            if players.len() > crate::coop::lockstep::MAX_PLAYERS {
+                return Err(bad());
+            }
+            Ok(Msg::Lobby {
+                needed: byte(1)?,
+                players,
+            })
+        }
         _ => Err(bad()),
     }
 }
@@ -278,6 +296,10 @@ mod tests {
         roundtrip(Msg::Ping { seq: 4 });
         roundtrip(Msg::Pong { seq: 4 });
         roundtrip(Msg::Alive { player: 2, frame: 3024 });
+        roundtrip(Msg::Lobby {
+            needed: 4,
+            players: vec!["Liam".into(), "Sam".into(), "Bo".into()],
+        });
     }
 
     #[test]

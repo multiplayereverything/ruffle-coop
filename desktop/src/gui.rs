@@ -253,6 +253,13 @@ fn show_lobby(ui: &mut Ui, lobby: &crate::coop::Lobby) {
                 }
             } else {
                 ui.label(RichText::new("Waiting for the host to start the game...").size(18.0));
+                if lobby.needed > 0 {
+                    ui.add_space(8.0);
+                    ui.label(format!("Players: {} of {}", lobby.players.len(), lobby.needed));
+                    for (i, name) in lobby.players.iter().enumerate() {
+                        ui.label(format!("Player {}: {name}", i + 1));
+                    }
+                }
             }
         });
     });
