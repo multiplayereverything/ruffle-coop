@@ -43,7 +43,8 @@ at the end), `docs/superpowers/coop-decisions.md`. Game-builder spec sent to eve
    = gun-mayhem-2's fingerprints; `p0 KEY1` = Space pauses). It will send .keys files for Ultimate Assassin 3, 2, 1:
    add each as a built-in (file + BUILT_IN entry) for the next release.
 7. Stealth Hunter 2 (local_a2a5f9be…): co-op SWF `ai-work-flash-games\stealthhunter2\mod\dist\stealthhunter2_coop_direct.swf`
-   (reads coop.players to pick 2-4 players). Told it to use test-build exe + `--keys stealth-hunter-2`. It saw
+   (reads coop.players to pick 2-4 players). It is WAITING for the exe path: tell it test-build exe + `--keys
+   stealth-hunter-2` (my reply was blocked by the app's message limit). It saw
    **windows_lab FAIL even for BadIceCream_coop.swf on this PC** (one window "shown 0.0/s", late frames) while other
    sessions were busy. Investigate with Territory War's report (item 3): an occluded/hidden window renders nothing
    (`occluded`/`minimized` skip render), and a loaded PC makes late frames. Reproduce alone before changing code.
