@@ -105,12 +105,20 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let (labels, paused) = crate::coop::session()
-                .map(|session| (session.labels(), session.paused_text()))
+            let (labels, paused, notice) = crate::coop::session()
+                .map(|session| (session.labels(), session.paused_text(), session.notice()))
                 .unwrap_or_default();
             show_labels(egui_ctx, player, &labels, menu_height_offset);
             if let Some(paused) = paused {
                 show_paused(egui_ctx, &paused);
+            }
+            if let Some(notice) = notice {
+                Area::new(Id::new("coop-notice"))
+                    .anchor(Align2::CENTER_TOP, vec2(0.0, 40.0))
+                    .order(Order::Foreground)
+                    .show(egui_ctx, |ui| {
+                        Frame::popup(ui.style()).show(ui, |ui| ui.label(RichText::new(notice).size(16.0)));
+                    });
             }
         }
 

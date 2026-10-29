@@ -46,6 +46,8 @@ pub enum Msg {
     /// Host to everyone, every few seconds: each player's round trip to the host, in ms (slot
     /// order; None until measured), for `coop.ping`.
     Pings { ms: Vec<Option<u32>> },
+    /// Host to everyone: `player` left; from `frame` on they hold nothing (every PC the same).
+    Left { player: u8, frame: u32 },
 }
 
 /// Names and reasons can't carry the separator or line breaks.
@@ -116,6 +118,7 @@ pub fn encode(msg: &Msg) -> String {
         Msg::Ping { seq } => format!("PI|{seq}"),
         Msg::Pong { seq } => format!("PO|{seq}"),
         Msg::Alive { player, frame } => format!("AL|{player}|{frame}"),
+        Msg::Left { player, frame } => format!("LF|{player}|{frame}"),
         Msg::Pings { ms } => {
             let ms: Vec<String> = ms.iter().map(|ms| ms.map_or("-".into(), |ms| ms.to_string())).collect();
             format!("PG|{}", ms.join(","))
@@ -246,6 +249,10 @@ pub fn decode(line: &str) -> Result<Msg, String> {
             want(2)?;
             Ok(Msg::Pong { seq: uint(1)? })
         }
+        "LF" => {
+            want(3)?;
+            Ok(Msg::Left { player: byte(1)?, frame: uint(2)? })
+        }
         "PG" => {
             want(2)?;
             let ms = parts[1]
@@ -321,6 +328,7 @@ mod tests {
                 ..Default::default()
             },
         });
+        roundtrip(Msg::Left { player: 2, frame: 1234 });
         roundtrip(Msg::Pings { ms: vec![Some(0), Some(162), None, Some(4000)] });
         roundtrip(Msg::Print {
             player: 1,

@@ -72,8 +72,10 @@ impl Stepper {
         if let Some(slot) = pressed {
             if self.paused.is_some() {
                 self.resume(player);
+                self.add_event(format!("resume {slot}"));
             } else {
                 self.pause(player, PausedBy::Player(slot));
+                self.add_event(format!("pause {slot}"));
             }
         }
         if self.paused.is_some() {
@@ -129,6 +131,14 @@ impl Stepper {
         // rendering has side effects on the game (e.g. scrollRect updates), so it happens
         // exactly once per frame on every PC
         player.render();
+    }
+
+    /// Something the game hears through `coop.events` ("join 1", "leave 2", "resume 0"...);
+    /// every PC adds the same on the same frame.
+    pub fn add_event(&mut self, event: String) {
+        if let Ok(mut api) = self.api.lock() {
+            api.add_event(event);
+        }
     }
 
     /// Who paused the game, while it is paused.

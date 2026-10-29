@@ -130,6 +130,8 @@ pub struct Lockstep {
     /// The frame the next local input is for (current frame + delay).
     next_local: u32,
     inputs: BTreeMap<u32, [Option<InputFrame>; MAX_PLAYERS]>,
+    /// The frame each player left at: from then on they hold nothing and are never waited for.
+    gone: [Option<u32>; MAX_PLAYERS],
 }
 
 impl Lockstep {
@@ -150,6 +152,7 @@ impl Lockstep {
             frame: 0,
             next_local: delay,
             inputs,
+            gone: [None; MAX_PLAYERS],
         }
     }
 
@@ -163,7 +166,7 @@ impl Lockstep {
 
     /// Stores another player's input. Inputs for frames already run, and repeats, are ignored.
     pub fn push_remote(&mut self, player: u8, frame: u32, input: InputFrame) {
-        if player >= self.player_count || frame < self.frame {
+        if player >= self.player_count || frame < self.frame || self.gone_at(player, frame) {
             return;
         }
         let slot = &mut self.inputs.entry(frame).or_insert([None; MAX_PLAYERS])[player as usize];
@@ -172,10 +175,49 @@ impl Lockstep {
         }
     }
 
-    /// Every player's input for the next frame (by player index), once all are in.
+    /// Every player's input for the next frame (by player index), once all are in; a player
+    /// who left holds nothing.
     pub fn ready(&self) -> Option<Vec<InputFrame>> {
-        let row = self.inputs.get(&self.frame)?;
-        row[..self.player_count as usize].iter().copied().collect()
+        let row = self.inputs.get(&self.frame);
+        (0..self.player_count)
+            .map(|p| match row.and_then(|row| row[p as usize]) {
+                Some(input) => Some(input),
+                None if self.gone_at(p, self.frame) => Some(InputFrame::default()),
+                None => None,
+            })
+            .collect()
+    }
+
+    fn gone_at(&self, player: u8, frame: u32) -> bool {
+        self.gone[player as usize].is_some_and(|from| from <= frame)
+    }
+
+    /// `player` left: from frame `from` on they hold nothing (inputs already here for those
+    /// frames are dropped). Every PC must be told the same frame (the host decides it).
+    pub fn leave(&mut self, player: u8, from: u32) {
+        if player >= self.player_count || self.gone[player as usize].is_some() {
+            return;
+        }
+        self.gone[player as usize] = Some(from);
+        for (_, row) in self.inputs.range_mut(from..) {
+            row[player as usize] = None;
+        }
+    }
+
+    /// The host's pick for a leaving player: the frame after the last input it has from them
+    /// (never one already run).
+    pub fn leave_frame(&self, player: u8) -> u32 {
+        let last = self.inputs.iter().rev().find(|(_, row)| row[player as usize].is_some());
+        last.map_or(self.frame, |(&frame, _)| (frame + 1).max(self.frame))
+    }
+
+    pub fn is_gone(&self, player: u8) -> bool {
+        self.gone[player as usize].is_some()
+    }
+
+    /// Players who leave at the next frame (for the game's `leave` event).
+    pub fn leaving_now(&self) -> Vec<u8> {
+        (0..self.player_count).filter(|&p| self.gone[p as usize] == Some(self.frame)).collect()
     }
 
     /// Call after running the frame `ready()` returned.
@@ -192,7 +234,7 @@ impl Lockstep {
     pub fn waiting_on(&self) -> Vec<u8> {
         let row = self.inputs.get(&self.frame);
         (0..self.player_count)
-            .filter(|&p| row.is_none_or(|row| row[p as usize].is_none()))
+            .filter(|&p| !self.gone_at(p, self.frame) && row.is_none_or(|row| row[p as usize].is_none()))
             .collect()
     }
 }
@@ -206,6 +248,35 @@ mod tests {
             buttons,
             ..Default::default()
         }
+    }
+
+    /// A player who left holds nothing from their leave frame on and is never waited for; their
+    /// late inputs (and ones already here for those frames) are dropped.
+    #[test]
+    fn a_player_who_left_holds_nothing() {
+        let mut lockstep = Lockstep::new(3, 0, 0);
+        for frame in 0..3 {
+            lockstep.push_remote(0, frame, key(UP));
+            lockstep.push_remote(2, frame, key(FIRE));
+        }
+        lockstep.push_remote(1, 0, key(LEFT));
+        lockstep.push_remote(1, 1, key(LEFT));
+        lockstep.push_remote(1, 2, key(LEFT)); // dropped: the test has them leave at 2
+        assert_eq!(lockstep.leave_frame(1), 3, "after their last input");
+        lockstep.leave(1, 2);
+        assert_eq!(lockstep.ready().map(|i| i[1].buttons), Some(LEFT), "frame 0 still has their input");
+        lockstep.advance();
+        lockstep.advance();
+        assert_eq!(lockstep.leaving_now(), vec![1]);
+        assert_eq!(lockstep.ready().map(|i| i[1]), Some(InputFrame::default()), "frame 2: gone, input dropped");
+        lockstep.advance();
+        lockstep.push_remote(1, 3, key(LEFT));
+        lockstep.push_remote(0, 3, key(UP));
+        assert_eq!(lockstep.waiting_on(), vec![2], "never waits for them");
+        lockstep.push_remote(2, 3, key(FIRE));
+        assert_eq!(lockstep.ready().map(|i| i[1]), Some(InputFrame::default()), "late input ignored");
+        assert!(lockstep.is_gone(1));
+        assert_eq!(lockstep.leaving_now(), Vec::<u8>::new());
     }
 
     #[test]

@@ -11,6 +11,7 @@
 //! ExternalInterface.call("coop.options")         every setting, as an object
 //! ExternalInterface.call("coop.ping", slot)      this PC's round trip to that player, ms (display only: differs per PC)
 //! ExternalInterface.call("coop.pause")           pauses the game for everyone (any player's Esc resumes)
+//! ExternalInterface.call("coop.events")          what happened since the last call: ["join 0", "leave 2", ...]
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
@@ -35,7 +36,10 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause", "events"];
+
+/// Events kept for a game that doesn't read them (the oldest go first).
+const MAX_EVENTS: usize = 100;
 
 /// A game that called `coop.typed` within this many frames gets every typed character.
 const WANTS_TEXT_FRAMES: u32 = 60;
@@ -63,6 +67,8 @@ pub struct CoopApi {
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
+    /// What happened that the game hasn't read yet (`coop.events`), oldest first.
+    pub events: std::collections::VecDeque<String>,
     /// The game asked to pause this frame (`coop.pause`), and whether it is paused.
     pub pause_asked: bool,
     pub paused: bool,
@@ -98,6 +104,7 @@ impl CoopApi {
             options: vec![],
             pings: [None; MAX_PLAYERS],
             pause_asked: false,
+            events: Default::default(),
             paused: false,
             frame: 0,
             typed_read_at: None,
@@ -125,6 +132,13 @@ impl CoopApi {
 
     pub fn wants_text(&self) -> bool {
         self.typed_read_at.is_some_and(|at| self.frame.saturating_sub(at) <= WANTS_TEXT_FRAMES)
+    }
+
+    pub fn add_event(&mut self, event: String) {
+        if self.events.len() == MAX_EVENTS {
+            self.events.pop_front();
+        }
+        self.events.push_back(event);
     }
 
     /// The camera this PC draws with.
@@ -168,6 +182,7 @@ impl CoopApi {
                     .collect();
                 Value::String(text)
             }
+            ("coop.events", _) => Value::List(self.events.drain(..).map(Value::String).collect()),
             ("coop.pause", _) => {
                 self.pause_asked = true;
                 Value::Bool(true)
@@ -346,6 +361,21 @@ mod tests {
             api.update(&[InputFrame::default(), InputFrame::default()]);
         }
         assert!(!api.wants_text(), "not read for a while");
+    }
+
+    #[test]
+    fn events_are_read_once() {
+        let mut api = CoopApi::new(2, 0);
+        api.add_event("join 0".into());
+        api.add_event("leave 1".into());
+        assert_eq!(api.answer("coop.events", &[]), Value::List(vec![s("join 0"), s("leave 1")]));
+        assert_eq!(api.answer("coop.events", &[]), Value::List(vec![]));
+        for i in 0..MAX_EVENTS + 5 {
+            api.add_event(format!("e{i}"));
+        }
+        let Value::List(kept) = api.answer("coop.events", &[]) else { panic!("a list") };
+        assert_eq!(kept.len(), MAX_EVENTS);
+        assert_eq!(kept[0], s("e5"), "the oldest went first");
     }
 
     #[test]
