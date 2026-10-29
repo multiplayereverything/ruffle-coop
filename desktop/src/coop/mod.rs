@@ -59,7 +59,8 @@ pub struct Lobby {
     pub room: Option<String>,
     /// Hosting directly: the port friends connect to.
     pub port: Option<u16>,
-    /// Hosting: the players in so far (the host first), and how many the game starts with.
+    /// The players in so far (the host first), and how many the game starts with (a friend
+    /// hears both from the host; 0 until then).
     pub players: Vec<String>,
     pub needed: u8,
     /// The handshake failed: why.

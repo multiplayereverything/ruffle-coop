@@ -35,6 +35,11 @@ const EXPLAIN_STALL: Duration = Duration::from_secs(5);
 const SLOW_FRAME: Duration = Duration::from_secs(2);
 /// The heartbeat's period; a player heard from within 3 of them still has Ruffle running.
 const HEARTBEAT: Duration = Duration::from_secs(1);
+/// Before the start the host tells the waiting friends who has joined this often, so a friend who
+/// joined early keeps waiting however long the last one takes.
+const LOBBY_EVERY: Duration = Duration::from_secs(2);
+/// A friend that hears nothing at all from the host for this long before the start gives up.
+const HOST_SILENT: Duration = if cfg!(test) { Duration::from_secs(5) } else { Duration::from_secs(30) };
 
 /// Ruffle Together's own version (the Ruffle it is built on has its own).
 pub const VERSION: &str = "1.0.3.5";
@@ -503,10 +508,18 @@ impl Session {
             let deadline = opts.host_wait.map(|wait| Instant::now() + wait);
             // accepted friends in join order: connection, Hello id, name
             let mut friends: Vec<(u8, u64, String)> = vec![];
+            let mut told: Option<(Instant, Vec<String>)> = None;
             while friends.len() + 1 < opts.players as usize {
                 let mut names = vec![opts.name.clone()];
                 names.extend(friends.iter().map(|(_, _, name)| name.clone()));
                 update_lobby(&|lobby| lobby.players = names.clone());
+                if told.as_ref().is_none_or(|(at, was)| at.elapsed() >= LOBBY_EVERY || *was != names) {
+                    link.send(&Msg::Lobby {
+                        needed: opts.players,
+                        players: names.clone(),
+                    });
+                    told = Some((Instant::now(), names));
+                }
                 let left = deadline.map_or(Duration::from_secs(3600), |d| {
                     d.saturating_duration_since(Instant::now())
                 });
@@ -578,8 +591,14 @@ impl Session {
         } else {
             link.send(&me);
             loop {
-                match next_event(&link, Duration::from_secs(30)) {
+                match next_event(&link, HOST_SILENT) {
                     Some(Event::Msg { msg: Msg::Refuse { id, reason }, .. }) if id == my_id => bail!("{reason}"),
+                    Some(Event::Msg { msg: Msg::Lobby { needed, players }, .. }) => {
+                        update_lobby(&|lobby| {
+                            lobby.needed = needed;
+                            lobby.players = players.clone();
+                        });
+                    }
                     // only the host's Hello (id 0) is checked: the host passes the other friends' on
                     Some(Event::Msg {
                         msg: Msg::Hello { build: b, swf_sha256: s, settings: o, id: 0, .. },
@@ -1462,6 +1481,47 @@ mod tests {
             assert_eq!(state.desync_at, None);
             assert_eq!(state.closed, None);
             assert_eq!(&session.my_prints, host_prints, "player {}", session.local_index + 1);
+        }
+    }
+
+    /// A friend who joins first waits as long as the last one takes (it used to give up after
+    /// 30 s of silence from the host), and sees who is in while it waits.
+    #[test]
+    fn an_early_friend_waits_for_the_last_one_and_sees_who_is_in() {
+        let Some(swf) = test_swf() else { return };
+        let port = free_port();
+        let three = |mut o: SessionOpts| {
+            o.players = 3;
+            o.game = Game::built_in("gun-mayhem-2").expect("built in");
+            o
+        };
+        let host_swf = swf.clone();
+        let host = thread::spawn(move || play(three(opts(Role::HostDirect { port }, &host_swf, 0)), 100, None));
+        thread::sleep(Duration::from_millis(300));
+        let lobby = Arc::new(Mutex::new(crate::coop::Lobby::default()));
+        let early = {
+            let (swf, lobby) = (swf.clone(), lobby.clone());
+            thread::spawn(move || {
+                let mut o = three(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0));
+                o.lobby = Some(lobby);
+                play(o, 100, None)
+            })
+        };
+        thread::sleep(Duration::from_secs(3));
+        {
+            let lobby = lobby.lock().expect("lobby");
+            assert_eq!(lobby.needed, 3, "the friend hears how many the game needs");
+            assert_eq!(lobby.players.len(), 2, "and who is in: {:?}", lobby.players);
+        }
+        // the last friend comes well after the friend's silence limit
+        thread::sleep(HOST_SILENT + Duration::from_secs(3));
+        let late = thread::spawn(move || {
+            play(three(opts(Role::JoinDirect { addr: format!("127.0.0.1:{port}") }, &swf, 0)), 100, None)
+        });
+        for (name, pc) in [("host", host), ("early friend", early), ("late friend", late)] {
+            let (state, session) = pc.join().expect(name);
+            assert_eq!(state.closed, None, "{name}");
+            assert!(session.frame() >= 100, "{name} played");
         }
     }
 
