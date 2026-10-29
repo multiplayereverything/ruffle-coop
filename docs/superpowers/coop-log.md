@@ -281,3 +281,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   it), tests 123/123, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay 165.232.82.11 room EMSHH 1500
   frames in sync with the release exe, zip SHA-256 d44451fa...bc69, latest, re-downloaded hash matches. mods-info
   918d218. Merged into local coop (with API round 2): 131/131.
+- API rounds 2 and 3 seen working (2026-10-30): `tools/coop-api/demo/` (CoopDemo.swf, every `coop.*` call on
+  screen; README there). Replay twice identical (0e27a771); two headless players through 165.232.82.11 room Z9CBB
+  1500 frames desync_at=none; two real windows (test-build exe, script only) showed labels, per-slot cameras, the
+  HUD, typed name board, key-map switch, game pause ("Paused") and Esc pause ("Paused by Ann"), events, options,
+  ping. Found: with a co-op camera, shapes, text and bitmaps outside the original stage were culled (only
+  containers showed), so a big world drew no rings, cursors or text there. Fix: `Stage::view_bounds` is the stage
+  plus what the camera shows.

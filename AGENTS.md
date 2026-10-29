@@ -28,6 +28,7 @@ player's PC runs the same Flash game and only inputs travel. Work happens on bra
 | Discord presence | `desktop/src/coop/discord.rs` |
 | Game-side helper library | `tools/coop-api/as2/RuffleTogether.as`, `tools/coop-api/as3/RuffleTogether.as` |
 | Labs | `tools/coop-lab/lab.py` (headless players), `tools/coop-lab/windows_lab.py` (two real windows) |
+| API demo (every `coop.*` call on screen) | `tools/coop-api/demo/` ([README](tools/coop-api/demo/README.md)) |
 
 ## Rules
 
@@ -37,6 +38,8 @@ player's PC runs the same Flash game and only inputs travel. Work happens on bra
 - **Tests:** `COOP_TEST_SWF=<BadIceCream_coop.swf> cargo test -p ruffle_desktop --release -- --test-threads=1`.
   The replay fingerprints must stay the same unless a change explains why: BIC 1500 frames `fa623659`,
   GM2 4 players 3300 frames `8e30f66c`, TW 2 players 3000 frames `ad6fe22d` (see HANDOFF.md for the files).
+- After any change to the co-op API or the session, run the API demo ([tools/coop-api/demo/README.md](tools/coop-api/demo/README.md)):
+  replay twice, two headless players through the relay, then two real windows. Add every new call to it.
 - `target\release\ruffle_desktop.exe` is often locked by other sessions' labs: use
   `target\release\deps\ruffle_desktop.exe`.
 - Ask the user before pushing, releasing, changing mods-info or the relay. Never drive the real keyboard or

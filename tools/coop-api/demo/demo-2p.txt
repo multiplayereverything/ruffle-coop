@@ -1,0 +1,86 @@
+# Two players drive the API demo (about 70 s at 30 fps). Both PCs run this file; each takes its own slot.
+wait 60
+# coop.typed: each player types a name on the board, fixes a typo, Enter makes it the dot's label
+type 0 Annx
+type 1 Bob
+wait 20
+type 0 {Backspace}a{Enter}
+type 1 by{Enter}
+wait 40
+# coop.buttons / camera: the dots leave the stage area, each camera follows its own dot
+p0 RIGHT|DOWN
+p1 LEFT|DOWN
+wait 30
+p1 RIGHT|DOWN
+wait 90
+# coop.button(slot, "FIRE"): rings
+p0 FIRE
+p1 0
+wait 30
+p0 0
+p1 FIRE
+wait 30
+p1 0
+# coop.mouseX/Y/mouseDown: each player's cursor (stage pixels go through that PC's camera)
+# (the dots are near 1120,1020 and 920,1020 now, so both cameras see the cursors)
+move 1060 940 0
+move 980 1100 1
+wait 30
+click 1180 960 0
+wait 10
+click 900 1080 1
+wait 30
+# coop.keys: KEY1 switches to the menu map (FIRE = Enter), FIRE, KEY1 back (FIRE = Space), FIRE
+p0 KEY1
+wait 2
+p0 0
+wait 20
+p1 FIRE
+wait 5
+p1 0
+wait 40
+p1 KEY1
+wait 2
+p1 0
+wait 20
+p0 FIRE
+wait 5
+p0 0
+wait 40
+# KEY3: player 2's camera off (plain stage view) then back on
+p1 KEY3
+wait 2
+p1 0
+wait 90
+p1 KEY3
+wait 2
+p1 0
+wait 30
+# coop.pause from the game (KEY2), player 2's Esc (PAUSE) resumes
+p0 KEY2
+wait 2
+p0 0
+wait 90
+p1 PAUSE
+wait 2
+p1 0
+wait 30
+# Esc pause by player 1, resumed by player 1
+p0 PAUSE
+wait 2
+p0 0
+wait 90
+p0 PAUSE
+wait 2
+p0 0
+wait 30
+# a last walk: both come back near the middle of the world
+p0 UP|LEFT
+p1 UP
+wait 60
+p0 RIGHT
+p1 RIGHT|UP
+wait 90
+p0 0
+p1 0
+wait 60

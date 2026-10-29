@@ -128,6 +128,11 @@ the button.
 | `--coop-replay SWF --coop-script FILE --coop-out FILE` | Test: run headless and write every frame's fingerprint |
 | `--coop-headless`, `--coop-frames N` | Test: a whole session without a window |
 
+## Demo
+
+[tools/coop-api/demo](../tools/coop-api/demo/README.md) is a small AS3 game that uses every call above and shows
+the answers on screen, with a key map and input scripts for replays, headless sessions and two real windows.
+
 ## Input scripts (tests and labs)
 
 ```text
