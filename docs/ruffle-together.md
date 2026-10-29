@@ -90,6 +90,10 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 
 - **In co-op or not:** `ExternalInterface.available && ExternalInterface.call("coop.players") > 0`. In plain Ruffle
   or Flash Player this is false: use the normal mouse and treat this PC as slot 0.
+- **AS1/AS2 SWFs older than version 8:** `ExternalInterface` is hidden from them, so `call` returns nothing. Unhide
+  the package and the class first:
+  `ASSetPropFlags(_global, "flash", 0, 4096); ASSetPropFlags(flash.external.ExternalInterface, null, 0, 4096);`
+  (found by the Bow Man session, SWF 6).
 - Every PC's mouse travels with its keys, so every answer except `localSlot` is the same on every PC for the same
   frame. A slot whose mouse hasn't moved yet reads (0, 0), up. A slot number outside 0..players-1 returns undefined.
 - **The normal mouse is the host's:** `_xmouse`/`_ymouse`, `stage.mouseX`/`mouseY`, mouse events, buttons and
