@@ -10,6 +10,7 @@
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
 //! ExternalInterface.call("coop.ping", slot)      this PC's round trip to that player, ms (display only: differs per PC)
+//! ExternalInterface.call("coop.pause")           pauses the game for everyone (any player's Esc resumes)
 //! ExternalInterface.call("coop.buttons", slot)   that slot's held buttons (UP 1, DOWN 2, LEFT 4, RIGHT 8, FIRE 16, ...)
 //! ExternalInterface.call("coop.button", slot, name)  true while that slot holds the button ("FIRE", "KEY1", ...)
 //! ExternalInterface.call("coop.version")         the API version (2)
@@ -34,7 +35,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "pause"];
 
 /// A game that called `coop.typed` within this many frames gets every typed character.
 const WANTS_TEXT_FRAMES: u32 = 60;
@@ -62,6 +63,9 @@ pub struct CoopApi {
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
+    /// The game asked to pause this frame (`coop.pause`), and whether it is paused.
+    pub pause_asked: bool,
+    pub paused: bool,
     /// This PC's round trip to each player in ms (differs per PC, like `local_slot`).
     pub pings: [Option<u32>; MAX_PLAYERS],
     /// The host's game settings, the same on every PC.
@@ -93,6 +97,8 @@ impl CoopApi {
             typed: Default::default(),
             options: vec![],
             pings: [None; MAX_PLAYERS],
+            pause_asked: false,
+            paused: false,
             frame: 0,
             typed_read_at: None,
             names: vec![],
@@ -161,6 +167,10 @@ impl CoopApi {
                     })
                     .collect();
                 Value::String(text)
+            }
+            ("coop.pause", _) => {
+                self.pause_asked = true;
+                Value::Bool(true)
             }
             ("coop.ping", Some(slot)) => self.pings[slot].map_or(Value::Undefined, |ms| Value::Number(ms.into())),
             ("coop.option", _) => text(0)

@@ -172,7 +172,12 @@ impl Game {
     }
 
     pub fn local_buttons(&self, held: &HashSet<PhysicalKey>) -> u16 {
-        let mut buttons = 0;
+        // Esc pauses, unless the map gives it to the game
+        let mut buttons = if held.contains(&PhysicalKey::Escape) && !self.local.iter().any(|(code, _)| *code == 27) {
+            crate::coop::lockstep::PAUSE
+        } else {
+            0
+        };
         for &key in held {
             let pressed = KeyDescriptor { physical_key: key, logical_key: LogicalKey::Unknown, key_location: KeyLocation::Standard };
             if let (Some(code), _) = ruffle_core::coop_key_codes(pressed) {
@@ -574,6 +579,17 @@ mod tests {
         }
         assert!(game("ultimate-crab-battle").has_local_char('1'));
         assert!(game("bad-ice-cream").has_local_char(' '));
+    }
+
+    /// Esc pauses (every map), unless the map gives Esc to the game.
+    #[test]
+    fn esc_pauses_unless_the_game_has_it() {
+        use crate::coop::lockstep::PAUSE;
+        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape])), PAUSE);
+        assert_eq!(game("gun-mayhem-2").local_buttons(&held(&[PhysicalKey::Escape, PhysicalKey::KeyZ])), PAUSE | FIRE);
+        let esc_is_fire = Game::parse("t", "slot 0: FIRE=27
+local: FIRE=27").expect("map");
+        assert_eq!(esc_is_fire.local_buttons(&held(&[PhysicalKey::Escape])), FIRE);
     }
 
     #[test]

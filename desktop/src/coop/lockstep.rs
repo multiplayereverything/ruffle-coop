@@ -18,6 +18,8 @@ pub const VIEW: u16 = 1024;
 pub const QUIT: u16 = 2048;
 pub const YES: u16 = 4096;
 pub const NO: u16 = 8192;
+/// Pauses or resumes the game for everyone (Esc on every PC, see `Game::local_buttons`).
+pub const PAUSE: u16 = 16384;
 
 /// A button by its name in input scripts and key maps (UP, FIRE, KEY1, ...; "0" is none).
 pub fn button_named(name: &str) -> Option<u16> {
@@ -37,6 +39,7 @@ pub fn button_named(name: &str) -> Option<u16> {
         "QUIT" => QUIT,
         "YES" => YES,
         "NO" => NO,
+        "PAUSE" => PAUSE,
         _ => return None,
     })
 }

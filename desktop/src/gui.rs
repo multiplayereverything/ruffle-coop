@@ -105,8 +105,13 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let labels = crate::coop::session().map(|session| session.labels()).unwrap_or_default();
+            let (labels, paused) = crate::coop::session()
+                .map(|session| (session.labels(), session.paused_text()))
+                .unwrap_or_default();
             show_labels(egui_ctx, player, &labels, menu_height_offset);
+            if let Some(paused) = paused {
+                show_paused(egui_ctx, &paused);
+            }
         }
 
         if let Some(player) = player {
@@ -212,6 +217,21 @@ fn show_labels(
         painter.text(at + vec2(1.0, 1.0), Align2::CENTER_BOTTOM, &label.text, font.clone(), Color32::BLACK);
         painter.text(at, Align2::CENTER_BOTTOM, &label.text, font, Color32::WHITE);
     }
+}
+
+/// Ruffle Together: who paused the game, over it, until someone presses Esc.
+fn show_paused(egui_ctx: &egui::Context, paused: &str) {
+    Area::new(Id::new("coop-paused"))
+        .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .order(Order::Foreground)
+        .show(egui_ctx, |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new(paused).size(22.0).strong());
+                    ui.label("Press Esc to resume");
+                });
+            });
+        });
 }
 
 /// Ruffle Together: the window's waiting screen until everyone has joined the session.
