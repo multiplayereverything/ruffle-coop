@@ -222,3 +222,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   Spec for game sessions: side-session-notes/.../ruffle-together-api-and-keymaps.md; sent to the mod-folders parent
   (queued) and to Territory War, Smileys War, Stealth Assassin (UA series), Air Battle, Intrusion 1, Intrusion 2,
   Stealth Hunter 2 (queued). Bow Man's reply was NOT delivered (its workspace needs the user's trust approval).
+- Ultimate Crab Battle key map (request from its session): --coop-keys ultimate-crab-battle, P1 arrows + A, P2
+  IJKL + U, P3 TFGH + R, P4 numpad 8456 + 0; every slot also KEY1-3 = 1-3, ALT = Ctrl, YES = Y, NO = N. Local:
+  arrows / W S D (no A), FIRE = Space, Enter, Z, F. Test ultimate_crab_battle_keys; desktop 108/108. Commit 048c81d.
+- Release v1.0.3.4 (user: "1.0.3.4", after the Stealth Hunter 2 session relayed its ask; the 1.0.4 content under a
+  1.0.3.x number): commit 141b54c, tests 108/108, zip SHA-256 dc05f145...6581, latest, re-downloaded hash matches,
+  exe reports 141b54c. Live relay with the downloaded exe, headless BIC 2p (room S7WZV): 750 frames, desync_at=none
+  both, felt delay median 101 ms. mods-info 3e963cd/df644b4 (1.0.3.4) and 434f083 (game text). Repo About text
+  now describes Ruffle Together; homepage -> releases/latest.
