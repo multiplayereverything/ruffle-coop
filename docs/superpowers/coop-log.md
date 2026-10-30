@@ -290,3 +290,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   plus what the camera shows.
 - Pausing removed (user: "i dont see a reason with coop.pause, get rid of it completely"): no PAUSE button, Esc is an
   ordinary key again, no `coop.pause`, no pause/resume events, no "Paused by" overlay. 147/147, replays unchanged.
+- Discord presence on (app id 1565524080453755040): two demo windows through the relay, the user's profile showed
+  "Ruffle Together / Playing CoopDemo / room 9V8V6 (2 of 2)". Asks for the art asset "logo" (not uploaded yet: a
+  "?" shows until it is). Join button still off (no join page yet).

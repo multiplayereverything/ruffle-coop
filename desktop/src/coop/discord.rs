@@ -7,9 +7,9 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::Duration;
 
-/// Ruffle Together's Discord application id (made at discord.com/developers). While it's this
-/// placeholder, presence is off.
-pub const APP_ID: &str = "REPLACE_WITH_DISCORD_APPLICATION_ID";
+/// Ruffle Together's Discord application id (discord.com/developers). Presence is off while
+/// it isn't a number.
+pub const APP_ID: &str = "1565524080453755040";
 
 /// The web page a Join button opens, followed by `<mod id>/<room code>`. Discord buttons only
 /// open https links, so this page opens `ruffle-together://join/<mod id>/<room code>` for the
@@ -78,9 +78,12 @@ fn run(receiver: mpsc::Receiver<Presence>) {
             if new_client.connect().is_err() {
                 continue;
             }
+            tracing::info!("Ruffle Together: Discord presence on");
             client = Some(new_client);
         }
         let mut activity = activity::Activity::new().details(presence.details.as_str()).state(presence.state.as_str());
+        // the app's art asset named "logo" (Discord developer portal, Rich Presence, Art Assets)
+        activity = activity.assets(activity::Assets::new().large_image("logo").large_text("Ruffle Together"));
         if let Some((players, max)) = presence.party {
             activity = activity.party(activity::Party::new().size([players.into(), max.into()]));
         }
@@ -103,13 +106,10 @@ fn run(receiver: mpsc::Receiver<Presence>) {
 mod tests {
     use super::*;
 
-    /// With the placeholder id nothing starts: no thread, no connection attempts; with the
-    /// placeholder page there is no Join button.
+    /// The app id turns presence on; with the placeholder page there is no Join button.
     #[test]
-    fn placeholders_turn_presence_and_join_off() {
-        assert!(APP_ID.parse::<u64>().is_err());
-        show(Presence { details: "Playing a test".into(), ..Default::default() });
-        assert!(matches!(PRESENCE.get(), Some(None)));
+    fn app_id_set_and_join_off_until_the_page_exists() {
+        assert!(APP_ID.parse::<u64>().is_ok());
         assert_eq!(join_link("gm2", "ABCDE"), None);
     }
 
