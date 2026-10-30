@@ -344,3 +344,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   each click lands on (now logged while friends may click). CF2 replay: Bob's Settings click on the title refused,
   Ann's Start! works, Bob's card only; replays identical (7fa064fb), relay room 2G9E9 3600 frames desync_at=none.
   153/153, BIC/GM2/TW unchanged.
+- Checkpoint (user: "remember the ruffle build we have rn in case it becomes too broken"): commit d0ac840 built clean
+  into `ruffle-checkpoints/2026-10-30-d0ac840/` (exe, its Chaos Faction 2 map, README); git branch
+  `checkpoint/friends-clicks-2026-10-30`. Taken before the private-screens work.
