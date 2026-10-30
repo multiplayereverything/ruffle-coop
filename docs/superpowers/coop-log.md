@@ -323,3 +323,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   Green: both windows' logs identical (frames 147-302). Replay twice 3fa99a8d, relay room Q6DSQ 1500 frames
   desync_at=none. Tests 153/153, replays BIC/GM2/TW unchanged. Found: a game's coop.keys reset the click rules;
   now a map changes them only if it has `mouse:`/`zone` lines.
+- Chaos Faction 2 character screen (user: "do on chaos faction 2", "Yes, add them"): built-in map gets `mouse: buttons`
+  and zones (P1 card host, P2 card below its header Bob, the P2 drop-down host). Replay (match2 + picks): Ann flips
+  hers, Bob flips his, each refused on the other's card, Bob refused on the drop-down, Bob may pick for P3 (open);
+  into the fight, replays identical (ed74c5a5), relay room FPLU4 3600 frames desync_at=none, two windows same.
+  The mod's own mod/chaos-faction-2.keys (used by the launcher until the next release) needs the same lines.

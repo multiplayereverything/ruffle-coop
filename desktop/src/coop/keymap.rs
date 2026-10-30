@@ -747,6 +747,12 @@ local: FIRE=27").expect("map");
         assert!(down_keys(&keys.events(1, MENU)).is_empty(), "only the host pauses");
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyT])), KEY1);
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyD])), KEY2);
+        // the character screen: friends click their own card, the P2 drop-down is the host's
+        assert_eq!(keys.mouse, Some(MouseMode::Buttons));
+        let px = |p: i32| p * 20;
+        assert!(Zone::allows(&keys.zones, 1, px(463), px(272)) && !Zone::allows(&keys.zones, 0, px(463), px(272)));
+        assert!(Zone::allows(&keys.zones, 0, px(118), px(272)) && !Zone::allows(&keys.zones, 1, px(118), px(272)));
+        assert!(!Zone::allows(&keys.zones, 1, px(483), px(175)), "the P2 drop-down");
     }
 
     #[test]
