@@ -46,7 +46,7 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.isHost` | **local** | `true` on the host's PC |
 | `coop.ping(slot)` | **local** | This PC's round trip to that player in ms (0 to itself; `undefined` until measured, about 2 s). Friend to friend goes through the host, so it's both trips added |
 | `coop.version` | shared | API version: 2 |
-| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat`, `clicks`, `zones` |
+| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat`, `clicks`, `zones`, `private`, `hover` |
 
 ### Input
 
@@ -70,6 +70,7 @@ mouse through `coop.mouseX` and friends). A game can let friends click too:
 
 | Call | Kind | Effect |
 |---|---|---|
+| `coop.hover(mode)` | shared | Where the game's one mouse rests between clicks while friends may click: `"off"` (the default) off the stage, so nobody's hover shows on anyone's screen; `"host"` at the host's mouse (the host's hover shows everywhere, as when only the host clicks). Each player's own cursor shows on their own screen either way |
 | `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"zones"`: a friend's clicks count only inside their own zone (below) and on something clickable there, like their own card on a character screen; the host clicks everything else. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
 | `coop.zone(slot, path)` | shared | The buttons inside the clip at `path` (`"_root.players.p2"`) belong to that player: their own card on a character screen. Nobody else's click on them counts, the host's included. It only applies while that clip is on show, so other screens are untouched. When zones nest, the most exact clip wins (`zone 0: _root.players.p2.combo` gives a card's drop-down back to the host) |
 | `coop.zone(slot, x, y, w, h)` | shared | The same for a box (stage pixels). A box applies on every screen, so prefer a clip. `coop.zone(slot)` clears that player's zones |
@@ -82,6 +83,25 @@ To find a button's path for a zone, turn friends' clicks on (`mouse: buttons`) a
 (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) says e.g. `player 2 clicks _root.players.p2.b10 (463, 272)`. For hover
 or drags of its own (a slider every player can move), a game sets `coop.mouse("host")` on that screen and
 uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
+
+### Private screens
+
+A pop-up that only one player sees and uses: a player editor, a shop, an inventory. Every PC runs the same
+game, so the pop-up is open in everyone's game; what changes is the picture and the mouse, the same way on every
+PC (no desync).
+
+| Call | Kind | Effect |
+|---|---|---|
+| `coop.only(path)` | shared | The clip at `path` (`"_root.pcb"`) belongs to whoever's click opened it, while it is on show: only their PC draws it, only they click it, and everyone else's mouse goes through it to what is underneath (their cursor isn't shown over it either) |
+| `coop.only(path, pattern)` | shared | The same, and while it is someone's nobody else may click the buttons that open it (`"_root.players.*.instance*"`: `*` is any one name, `instance*` any name starting so). For a game that has one of the pop-up for everyone (one Player Editor): a second player opening theirs would take over the first one's. A refused player sees "Bob has that open: wait until they close it" |
+| `coop.only(slot, path)` | shared | The same, always that player's |
+| `coop.shared(path)` | shared | Everyone sees and clicks it again |
+
+A key map does the same without changing the SWF: `private: _root.pcb opened-by _root.players.*.instance*`
+(Chaos Faction 2's Player Editor and its Edit Player buttons), and `hover: host` or `hover: off`. It
+works with friends' clicks (`mouse: zones` or `buttons`): the player who opened the pop-up clicks it even
+outside their zone. Limits: the pop-up is still open in everyone's game, so a game that freezes the screen behind
+its pop-ups freezes it for everyone; `BitmapData.draw` of the stage still sees it on every PC.
 
 ### Host settings
 
@@ -118,6 +138,7 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 | **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 13 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected, typed text only reaches `coop.typed`; instead each player's key press types its game key's character (from any key map, `coop.keys` included, and in scripts and replays), so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
+| **Private screens** | With `private: <clip>` in the key map, a pop-up only the player who opened it sees and clicks |
 | **Friends' cursors** | Off by default. While friends may click (`mouse: zones`, `buttons` or `all`), a player's mouse shows in the other windows (an arrow in their colour with their name, picture only) only while it is over something that player may click, e.g. their own card on a character screen |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |

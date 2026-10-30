@@ -904,6 +904,20 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.set_flag(DisplayObjectFlags::COOP_HUD, value);
     }
 
+    pub(crate) fn is_coop_not_drawn(&self) -> bool {
+        self.contains_flag(DisplayObjectFlags::COOP_NOT_DRAWN)
+    }
+
+    pub(crate) fn set_coop_not_drawn(&self, value: bool) {
+        self.set_flag(DisplayObjectFlags::COOP_NOT_DRAWN, value);
+    }
+
+    /// Ruffle Together: shows or hides the clip for mouse picking only, without the side
+    /// effects of `_visible` (focus); the caller puts it back.
+    pub(crate) fn set_visible_for_picking(&self, value: bool) {
+        self.set_flag(DisplayObjectFlags::VISIBLE, value);
+    }
+
     fn masker(&self) -> Option<DisplayObject<'gc>> {
         self.masker.get()
     }
@@ -980,6 +994,12 @@ pub fn render_base<'gc>(
 ) {
     if options.skip_masks && this.maskee().is_some() {
         // Skip rendering masks (unless we are rendering one explicitly).
+        return;
+    }
+
+    if this.base().is_coop_not_drawn() && !context.is_offscreen {
+        // Ruffle Together: another player's private screen (BitmapData.draw still sees it, as on
+        // every PC)
         return;
     }
 
@@ -3131,6 +3151,10 @@ bitflags! {
 
         /// Ruffle Together: a HUD clip, drawn without the co-op camera.
         const COOP_HUD                = 1 << 18;
+
+        /// Ruffle Together: a clip this PC doesn't draw (another player's private screen). The
+        /// picture only: the game still has it.
+        const COOP_NOT_DRAWN          = 1 << 19;
     }
 }
 

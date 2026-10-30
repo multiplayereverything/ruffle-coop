@@ -1060,6 +1060,27 @@ impl Player {
         target
     }
 
+    /// Ruffle Together: whether the clip at `path` is on show (a private screen opened).
+    pub fn coop_clip_shown(&mut self, path: &str) -> bool {
+        self.mutate_with_update_context(|context| crate::coop_view::shown(context, path))
+    }
+
+    /// Ruffle Together: whether the stage point (x, y) (twips) is on the clip at `path`.
+    pub fn coop_clip_covers(&mut self, path: &str, x: i32, y: i32) -> bool {
+        self.mutate_with_update_context(|context| crate::coop_view::covers(context, path, Twips::new(x), Twips::new(y)))
+    }
+
+    /// Ruffle Together: whether this PC draws the clip at `path` (the picture only).
+    pub fn coop_set_drawn(&mut self, path: &str, drawn: bool) -> bool {
+        self.mutate_with_update_context(|context| crate::coop_view::set_drawn(context, path, drawn))
+    }
+
+    /// Ruffle Together: takes the clip at `path` out of mouse picking, or puts it back with the
+    /// visibility it had; returns what it had.
+    pub fn coop_set_pickable(&mut self, path: &str, pickable: bool) -> Option<bool> {
+        self.mutate_with_update_context(|context| crate::coop_view::set_pickable(context, path, pickable))
+    }
+
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).
     pub fn stage_to_viewport(&mut self, x: i32, y: i32) -> (f64, f64) {
         let matrix = self.mutate_with_update_context(|context| context.stage.view_matrix());

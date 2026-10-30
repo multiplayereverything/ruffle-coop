@@ -988,6 +988,13 @@ impl Session {
                 }
             }
             self.stepper.step(player, &inputs);
+            for (who, whose) in self.stepper.take_busy() {
+                if who == self.local_index {
+                    let text = format!("{} has that open: wait until they close it", self.name(whose));
+                    tracing::info!("Ruffle Together: {text}");
+                    self.notice = Some((text, Instant::now()));
+                }
+            }
             self.heartbeat.step_started.store(0, Ordering::Relaxed);
             let took = step_started.elapsed();
             if took > SLOW_FRAME {

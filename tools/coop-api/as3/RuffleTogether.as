@@ -68,6 +68,21 @@ package {
         /** The buttons inside the clip at path ("_root.players.p2") belong to that player, while it is on show. */
         public static function zoneClip(slot:int, path:String):Boolean { return send("coop.zone", slot, path) == true; }
 
+        /** A private screen: the clip at path is seen and clicked only by the player whose click opened it. */
+        public static function only(path:String):Boolean { return send("coop.only", path) == true; }
+
+        /** A private screen that is always that player's. */
+        public static function onlyFor(slot:int, path:String):Boolean { return send("coop.only", slot, path) == true; }
+
+        /** A private screen, and while it is someone's nobody else may click the buttons that open it ("_root.players.*.instance*"). */
+        public static function onlyOpenedBy(path:String, pattern:String):Boolean { return send("coop.only", path, pattern) == true; }
+
+        /** Where the game's mouse rests between clicks while friends may click: "off" (no hover for anyone) or "host". */
+        public static function hover(mode:String):Boolean { return send("coop.hover", mode) == true; }
+
+        /** Everyone sees and clicks the clip at path again. */
+        public static function shared(path:String):Boolean { return send("coop.shared", path) == true; }
+
         /** Clears that player's zones. */
         public static function zoneOff(slot:int):Boolean { return send("coop.zone", slot) == true; }
 

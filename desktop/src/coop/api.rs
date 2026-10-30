@@ -11,6 +11,12 @@
 //!                                                their own zone), "buttons" (friends on clickable things
 //!                                                too) or "all"
 //! ExternalInterface.call("coop.zone", slot, x, y, w, h)  only that slot may click in the box; (slot) clears its boxes
+//! ExternalInterface.call("coop.only", path)      a private screen: only the player who opened it sees and clicks it
+//! ExternalInterface.call("coop.only", slot, path)  ... only that slot; coop.shared(path) makes it everyone's again
+//! ExternalInterface.call("coop.only", path, pattern)  ... and while it is someone's, nobody else may click the
+//!                                                buttons that open it (pattern: "_root.players.*.instance*")
+//! ExternalInterface.call("coop.hover", mode)     "off": the game's mouse rests off the stage between clicks (no
+//!                                                hover for anyone; the default while friends may click), "host"
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
@@ -40,7 +46,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat", "clicks", "zones"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat", "clicks", "zones", "private", "hover"];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;
@@ -54,6 +60,21 @@ pub struct Camera {
     pub x: f64,
     pub y: f64,
     pub zoom: f64,
+}
+
+/// A private screen: the clip at `path` belongs to one player while it is on show (`fixed`, or
+/// whoever's click opened it): only their PC draws it, only they click it, and everyone else's
+/// mouse goes through it. The game still has it on every PC; only the picture and the mouse
+/// differ, the same way on every PC.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Private {
+    pub path: String,
+    pub fixed: Option<u8>,
+    /// The buttons that open it (a path pattern): while it is someone's, nobody else may click
+    /// them (the game has one of it).
+    pub openers: Option<String>,
+    /// Whose it is while it is on show.
+    pub owner: Option<u8>,
 }
 
 /// A name tag that Ruffle draws above a clip.
@@ -75,6 +96,10 @@ pub struct CoopApi {
     /// then whatever the game says (`coop.mouse`, `coop.zone`).
     pub mouse_mode: crate::coop::keymap::MouseMode,
     pub zones: Vec<crate::coop::keymap::Zone>,
+    /// Private screens: drawn only on their owner's PC, clicked only by them.
+    pub privates: Vec<Private>,
+    /// Where the game's mouse rests between clicks while friends may click (None: off the stage).
+    pub hover: Option<crate::coop::keymap::Hover>,
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
     /// What happened that the game hasn't read yet (`coop.events`), oldest first.
@@ -109,6 +134,8 @@ impl CoopApi {
             clicked: [false; MAX_PLAYERS],
             mouse_mode: Default::default(),
             zones: vec![],
+            privates: vec![],
+            hover: None,
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
             options: vec![],
@@ -229,6 +256,30 @@ impl CoopApi {
             ("coop.options", _) => Value::Object(
                 self.options.iter().map(|(n, v)| (n.clone(), Value::String(v.clone()))).collect(),
             ),
+            ("coop.only", _) => {
+                let (fixed, path, openers) = match (slot, text(0), text(1)) {
+                    (Some(slot), _, Some(path)) => (Some(slot as u8), path, None),
+                    (_, Some(path), openers) => (None, path, openers),
+                    _ => return Value::Bool(false),
+                };
+                self.privates.retain(|private| private.path != path);
+                self.privates.push(Private { path, fixed, openers, owner: None });
+                Value::Bool(true)
+            }
+            ("coop.hover", _) => match text(0).and_then(|mode| crate::coop::keymap::Hover::named(&mode)) {
+                Some(hover) => {
+                    self.hover = Some(hover);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.shared", _) => match text(0) {
+                Some(path) => {
+                    self.privates.retain(|private| private.path != path);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
             ("coop.buttons", Some(slot)) => Value::Number(self.buttons[slot].into()),
             ("coop.button", Some(slot)) => match text(1).and_then(|name| crate::coop::lockstep::button_named(&name)) {
                 Some(button) => Value::Bool(self.buttons[slot] & button != 0),
@@ -334,6 +385,19 @@ mod tests {
         assert_eq!(api.zones.len(), 1);
         assert_eq!(api.answer("coop.zone", &[Value::Number(1.0)]), Value::Bool(true));
         assert!(api.zones.is_empty());
+        // private screens: whoever opens it, or a fixed player; coop.shared ends it
+        assert_eq!(api.answer("coop.only", &[Value::String("_root.notes".into())]), Value::Bool(true));
+        assert_eq!(api.answer("coop.only", &[Value::Number(1.0), Value::String("_root.shop".into())]), Value::Bool(true));
+        let privates: Vec<_> = api.privates.iter().map(|p| (p.path.as_str(), p.fixed)).collect();
+        assert_eq!(privates, [("_root.notes", None), ("_root.shop", Some(1))]);
+        assert_eq!(api.answer("coop.shared", &[Value::String("_root.notes".into())]), Value::Bool(true));
+        assert_eq!(api.privates.len(), 1);
+        assert_eq!(api.answer("coop.only", &[]), Value::Bool(false));
+        let with_openers = [Value::String("_root.pcb".into()), Value::String("_root.players.*.instance*".into())];
+        assert_eq!(api.answer("coop.only", &with_openers), Value::Bool(true));
+        assert_eq!(api.privates.last().and_then(|p| p.openers.as_deref()), Some("_root.players.*.instance*"));
+        assert_eq!(api.answer("coop.hover", &[Value::String("host".into())]), Value::Bool(true));
+        assert_eq!(api.hover, Some(crate::coop::keymap::Hover::Host));
     }
 
     fn n(v: f64) -> Value {

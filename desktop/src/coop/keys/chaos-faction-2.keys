@@ -12,3 +12,7 @@ local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MEN
 mouse: zones
 zone 1: _root.players.p2
 zone 0: _root.players.p2.combo
+# The Player Editor (Edit Player on a card) is private: only the player whose click opened it sees and clicks
+# it; everyone else's mouse goes through it. The game has one editor, so while it is open nobody else's Edit
+# Player button works (they see "... has that open").
+private: _root.pcb opened-by _root.players.*.instance*

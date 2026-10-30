@@ -347,3 +347,15 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
 - Checkpoint (user: "remember the ruffle build we have rn in case it becomes too broken"): commit d0ac840 built clean
   into `ruffle-checkpoints/2026-10-30-d0ac840/` (exe, its Chaos Faction 2 map, README); git branch
   `checkpoint/friends-clicks-2026-10-30`. Taken before the private-screens work.
+- Private screens (user: "i want only the player that clicked on it to see it"): key map `private: <clip>` / API
+  `coop.only(path)`, `coop.only(slot, path)`, `coop.shared(path)`. The clip belongs to whoever's click opened it:
+  only their PC draws it (new picture-only flag, like the HUD), only they click it (it is their zone), everyone else's
+  mouse goes through it (it steps out of picking for their mouse events) and their cursor isn't drawn over it.
+  User found: with one editor in the game, a second player opening theirs took it over; and the host's hover showed
+  for everyone. Fixes: `opened-by <pattern>` (and `coop.only(path, pattern)`): while it is someone's, nobody else's
+  click on its openers counts, and they see "Bob has that open: wait until they close it"; `hover: off` (the
+  default while friends may click) rests the game's mouse off the stage between clicks, `hover: host` / `coop.hover`.
+  Chaos Faction 2: `private: _root.pcb opened-by _root.players.*.instance*` (the editor is _root.pcb, Edit Player
+  buttons are _root.players.pN.instanceK, found from the click log). Windows: Bob's editor only on Bob's screen, Ann's
+  Edit Player refused with the notice, after Bob's Cancel Ann's opens only on hers, Bob's refused. Replays identical
+  (5b2d0408), relay room GHRMG 2800 frames desync_at=none. Tests 154/154, replays BIC/GM2/TW unchanged.

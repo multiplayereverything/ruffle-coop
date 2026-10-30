@@ -15,6 +15,11 @@
 //! zone 1: _root.players.p2                  only player 2 may click the buttons in this clip (only
 //!                                           while it is on show; the most exact clip wins)
 //! zone 1: 290,95 200x190                    or in this box (stage pixels, on every screen)
+//! private: _root.pcb                        a pop-up only the player who opened it sees and clicks;
+//!   opened-by _root.players.*.instance*     ... and nobody else opens it while it is theirs
+//! hover: off                                the game's mouse rests off the stage between clicks, so
+//!                                           nobody's hover shows (the default while friends may
+//!                                           click); hover: host keeps it at the host's mouse
 //! ```
 
 use crate::coop::lockstep::{MAX_PLAYERS, button_named};
@@ -54,6 +59,50 @@ pub struct Game {
     /// The map's `mouse:` line, if it has one.
     mouse: Option<MouseMode>,
     zones: Vec<Zone>,
+    /// Clips that are private screens (`private:`), with the buttons that open them.
+    privates: Vec<(String, Option<String>)>,
+    hover: Option<Hover>,
+}
+
+/// Where the game's one mouse rests between clicks while friends may click (`hover:` in a key
+/// map, or the game's `coop.hover`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hover {
+    /// At the host's mouse: the host's hover shows on every screen.
+    Host,
+    /// Off the stage: nobody's hover shows anywhere.
+    Off,
+}
+
+impl Hover {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "host" => Some(Self::Host),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the clip path `target` fits `pattern`: the same number of names, each the same, or
+/// `*` (any name), or ending in `*` (any name starting so): `_root.players.*.instance*`.
+pub fn path_fits(target: &str, pattern: &str) -> bool {
+    let (mut target, mut pattern) = (target.split('.'), pattern.split('.'));
+    loop {
+        match (target.next(), pattern.next()) {
+            (None, None) => return true,
+            (Some(name), Some(want)) => {
+                let fits = match want.strip_suffix('*') {
+                    Some(start) => name.starts_with(start),
+                    None => name == want,
+                };
+                if !fits {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
 }
 
 /// Who may click the game (`mouse:` in a key map, or the game's `coop.mouse`).
@@ -188,6 +237,8 @@ impl Game {
             local: vec![],
             mouse: None,
             zones: vec![],
+            privates: vec![],
+            hover: None,
         };
         for (number, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
@@ -224,6 +275,18 @@ impl Game {
                 })()
                 .ok_or_else(|| fail("expected zone N: X,Y WxH or zone N: _root.clip".into()))?;
                 game.zones.push(zone);
+            } else if let Some(rest) = line.strip_prefix("private:") {
+                let (path, openers) = match rest.split_once(" opened-by ") {
+                    Some((path, openers)) => (path.trim(), Some(openers.trim())),
+                    None => (rest.trim(), None),
+                };
+                let one_name = |text: &str| !text.is_empty() && !text.contains(char::is_whitespace);
+                if !one_name(path) || openers.is_some_and(|o| !one_name(o)) {
+                    return Err(fail("expected private: _root.clip (opened-by _root.pattern)".into()));
+                }
+                game.privates.push((path.to_string(), openers.map(str::to_string)));
+            } else if let Some(hover) = line.strip_prefix("hover:") {
+                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is host or off: {hover}")))?);
             } else if let Some(list) = line.strip_prefix("local:") {
                 for (button, codes) in pairs(list)? {
                     game.local.extend(codes.into_iter().map(|code| (code, button)));
@@ -282,6 +345,8 @@ impl Game {
             shared: self.shared,
             mouse: self.mouse,
             zones: self.zones.clone(),
+            privates: self.privates.clone(),
+            hover: self.hover,
         }
     }
 
@@ -376,6 +441,10 @@ pub struct GameKeys {
     /// None and no boxes when it says nothing, so a game's own `coop.keys` map keeps the rules).
     pub mouse: Option<MouseMode>,
     pub zones: Vec<Zone>,
+    /// The map's private screens (`private:`), with the buttons that open them.
+    pub privates: Vec<(String, Option<String>)>,
+    /// Where the game's mouse rests between clicks (`hover:`), if the map says.
+    pub hover: Option<Hover>,
 }
 
 impl GameKeys {
@@ -447,6 +516,17 @@ zone 1: 290,95 200x190").expect("map");
         assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.players.p20")), "not a clip inside it");
         assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.startbutton")) && !Zone::is_own(&clips, 1, 0, 0, Some("_root.startbutton")));
         assert!(Zone::allows(&clips, 0, 0, 0, None), "nothing clicked there");
+        let private = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb\nhover: host").expect("map").keys();
+        assert_eq!(private.privates, [("_root.pcb".to_string(), None)]);
+        assert_eq!(private.hover, Some(Hover::Host));
+        let opened = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb opened-by _root.players.*.instance*").expect("map");
+        assert_eq!(opened.keys().privates, [("_root.pcb".to_string(), Some("_root.players.*.instance*".to_string()))]);
+        assert!(Game::parse("t", "slot 0: FIRE=32\nprivate:").is_err());
+        assert!(Game::parse("t", "slot 0: FIRE=32\nhover: maybe").is_err());
+        assert!(path_fits("_root.players.p1.instance189", "_root.players.*.instance*"));
+        assert!(!path_fits("_root.players.p1.b9", "_root.players.*.instance*"), "an arrow");
+        assert!(!path_fits("_root.players.p2.combo.instance614", "_root.players.*.instance*"), "deeper");
+        assert!(!path_fits("_root.pcb.instance244", "_root.players.*.instance*"));
         assert_eq!(Game::parse("t", "slot 0: FIRE=32").expect("map").keys().mouse, None);
         assert!(Game::parse("t", "slot 0: FIRE=32
 mouse: some").is_err());
