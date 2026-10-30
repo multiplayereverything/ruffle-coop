@@ -367,3 +367,13 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   Kept as options: `hover: own` (per PC, only Button symbols' own Up/Over art, built from their records without
   running code; nothing custom) and `hover: off`. Tests 154/154, replays BIC/GM2/TW unchanged, Chaos Faction 2
   replays identical (18b022a3), relay room F72NH 2800 frames desync_at=none.
+- Click queue and 4 players (user: "queueing it is"): Flash has one mouse button; friends' clicks that land together
+  used to be dropped. Now they queue (one a frame, oldest first, then by slot; a queued player who already let go
+  gets a press and a release); the host's click still goes at once; a friend holding the button over 30 frames while
+  others wait is let go. Scripts gained `press X Y SLOT` / `release SLOT` (no frame passes). Test
+  four_players_take_turns_on_the_one_mouse: 3 friends in one frame all arrive in slot order, player 3's box keeps out
+  player 4, a long hold gives way, player 3's private pop-up with 4 players. API demo demo-4p.txt: replay twice
+  identical (4c06b3f1), 4 headless players on the relay room HNNSJ desync_at=none for all 4, 4 real windows (room
+  846PM): every window logged Red f270, Blue f271, Green f272, player 4 refused on Bob's switch, Bob's switch ON.
+  156/156, replays BIC/GM2/TW unchanged, Chaos Faction 2 replay unchanged (18b022a3). Seen: a name tag of a dot out
+  of view is drawn outside the game area in a small window (picture only).

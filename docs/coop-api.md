@@ -78,7 +78,10 @@ mouse through `coop.mouseX` and friends). A game can let friends click too:
 A key map can set both without changing the SWF: `mouse: zones` and `zone 1: _root.players.p2` (player 2's
 card). Chaos Faction 2's built-in map does this for its character screen. A friend's click moves the game's
 mouse to their point for the click and back to the host's after, so hover effects can flicker while friends
-click. One click at a time, but the host's click always goes through (a friend's held click is let go first).
+click. Flash has one mouse button, so clicks take turns: the host's always goes at once (a friend's held click is
+let go first); friends' clicks that land together wait in a queue and follow one a frame, oldest first, then by
+slot (tested with 4 players: three friends clicking in the same frame all reach the game); a friend holding the
+button over a second while others wait is let go.
 To find a button's path for a zone, turn friends' clicks on (`mouse: buttons`) and click it once: the log
 (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) says e.g. `player 2 clicks _root.players.p2.b10 (463, 272)`. For hover
 or drags of its own (a slider every player can move), a game sets `coop.mouse("host")` on that screen and
@@ -182,4 +185,6 @@ wait 25           25 frames with what is held now
 click 275 300 1   player 1's mouse: one frame pressed at stage pixel (275, 300)
 move 100 50       the host's mouse moves
 type 1 Sam{Enter} player 1 types "Sam" then Enter (8 characters a frame; {Backspace} too)
+press 100 50 2    player 2's mouse moves there and holds its button, no frame passes (so several
+release 2          players can press in the same frame); release lets go, no frame passes
 ```

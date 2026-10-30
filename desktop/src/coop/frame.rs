@@ -30,7 +30,30 @@ pub struct Stepper {
     local_mouse: Option<(i32, i32)>,
     /// Clicks refused because another player has that private screen open: (who, whose).
     busy: Vec<(u8, u8)>,
+    /// Friends' clicks waiting for the game's one mouse button, oldest first.
+    queue: std::collections::VecDeque<QueuedClick>,
+    /// A queued click whose player had already let go: released on the next frame (who, where).
+    release_next: Option<(u8, i32, i32)>,
+    /// How many frames the current friend's click has been held while others wait.
+    held: u32,
 }
+
+/// A friend's click waiting for the game's one mouse button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct QueuedClick {
+    slot: u8,
+    x: i32,
+    y: i32,
+    /// They let go while waiting: the click is a press and a release.
+    released: bool,
+}
+
+/// The most clicks that wait; more are dropped (nobody clicks that fast).
+const QUEUE_MAX: usize = 8;
+
+/// A friend may hold the game's mouse button this long (frames) while others wait; then their
+/// click is let go, so nobody blocks the others.
+const HOLD_MAX: u32 = 30;
 
 /// Where the game's mouse rests while nobody's hover should show: off the stage (twips).
 const PARKED: (i32, i32) = (-4000, -4000);
@@ -54,6 +77,9 @@ impl Stepper {
             parked: false,
             local_mouse: None,
             busy: vec![],
+            queue: Default::default(),
+            release_next: None,
+            held: 0,
         }
     }
 
@@ -115,9 +141,10 @@ impl Stepper {
     /// first) moves it to that player's point for the click, and back to the host's after. Who
     /// may click is the key map's or the game's rule: the host only, friends too on what the game
     /// made clickable (anywhere, or only in their own zone), or anyone anywhere; nobody in a box
-    /// that belongs to someone else. One click at a time, since Flash has one mouse button, but
-    /// the host's click always goes through. Everything comes from inputs and game state, so
-    /// every PC does the same.
+    /// that belongs to someone else. Flash has one mouse button, so one click at a time: the
+    /// host's always goes at once, a friend's waits its turn (oldest first, then by slot), and a
+    /// friend holding the button long while others wait is let go. Everything comes from inputs
+    /// and game state, so every PC does the same.
     fn feed_mice(&mut self, player: &mut Player, inputs: &[InputFrame]) {
         let (mode, mut zones, privates, hover) = self
             .api
@@ -126,6 +153,7 @@ impl Stepper {
             .unwrap_or_default();
         // an open private screen is its owner's alone
         zones.extend(owned_zones(&privates));
+        let rules = ClickRules { mode, zones, privates };
         // `hover: off`: the game's mouse rests off the stage between clicks, so there is no hover
         // at all; otherwise it follows the host's, as in the game (the default; with `own`, each
         // PC then draws Button symbols by its own player's mouse)
@@ -140,10 +168,16 @@ impl Stepper {
             && let Some((x, y, _)) = host
             && self.clicking.is_none_or(|slot| slot == 0)
         {
-            as_player(player, &privates, 0, |player| move_mouse(player, x, y));
+            as_player(player, &rules.privates, 0, |player| move_mouse(player, x, y));
             self.parked = false;
         }
         self.mouse = host;
+        // a queued click whose player had already let go: its release
+        if let Some((slot, x, y)) = self.release_next.take()
+            && self.clicking == Some(slot)
+        {
+            self.end_click(player, &rules, park, slot, x, y);
+        }
         for (slot, input) in inputs.iter().enumerate().take(self.mice.len()) {
             let before = self.mice[slot];
             let Some((x, y, down)) = input.mouse else {
@@ -153,75 +187,120 @@ impl Stepper {
             let was_down = before.is_some_and(|(_, _, down)| down);
             let slot = slot as u8;
             if self.clicking == Some(slot) {
-                as_player(player, &privates, slot, |player| {
-                    if (slot > 0 || park) && before.is_some_and(|(bx, by, _)| (bx, by) != (x, y)) {
-                        move_mouse(player, x, y); // a drag
-                    }
-                    if !down {
-                        let (vx, vy) = player.stage_to_viewport(x, y);
-                        player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
-                    }
-                });
+                if (slot > 0 || park) && before.is_some_and(|(bx, by, _)| (bx, by) != (x, y)) {
+                    as_player(player, &rules.privates, slot, |player| move_mouse(player, x, y)); // a drag
+                }
                 if !down {
-                    self.clicking = None;
-                    if park {
-                        move_mouse(player, PARKED.0, PARKED.1);
-                        self.parked = true;
-                    } else if slot > 0
-                        && let Some((hx, hy, _)) = self.mouse
-                    {
-                        as_player(player, &privates, 0, |player| move_mouse(player, hx, hy));
-                    }
+                    self.end_click(player, &rules, park, slot, x, y);
                 }
-            } else if down && !was_down && (self.clicking.is_none() || slot == 0) {
-                if slot == 0
-                    && let Some(friend) = self.clicking.take()
-                {
-                    // the host never waits on a friend: a friend's click still held (a release
-                    // that never came, e.g. let go outside their window) is let go where the host
-                    // clicks, then the host's click goes through
-                    as_player(player, &privates, friend, |player| {
-                        move_mouse(player, x, y);
-                        let (vx, vy) = player.stage_to_viewport(x, y);
-                        player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
-                    });
-                    tracing::info!("Ruffle Together: player {}'s held click let go for the host's", friend + 1);
-                }
-                let (allowed, target) = as_player(player, &privates, slot, |player| {
-                    (may_click(player, mode, &zones, slot, x, y), player.coop_click_target(x, y))
-                });
-                // the game has one of each private screen: while it is someone's, nobody else
-                // opens it (that would take it over)
-                let busy = target.as_deref().and_then(|target| {
-                    privates.iter().find_map(|p| {
-                        let opener = p.openers.as_deref().is_some_and(|pattern| crate::coop::keymap::path_fits(target, pattern));
-                        p.owner.filter(|&owner| owner != slot && opener)
-                    })
-                });
-                if let Some(owner) = busy {
-                    self.busy.push((slot, owner));
-                }
-                let allowed = allowed && busy.is_none();
-                if mode != MouseMode::Host || !privates.is_empty() {
-                    // for key map authors: what each click lands on (zones and private screens
-                    // name these paths)
-                    let target = target.unwrap_or_else(|| "nothing clickable".into());
-                    let verdict = if allowed { "clicks" } else { "may not click" };
-                    tracing::info!("Ruffle Together: player {} {verdict} {target} ({}, {})", slot + 1, x / 20, y / 20);
-                }
-                if allowed {
-                    as_player(player, &privates, slot, |player| {
-                        if slot > 0 || park {
+            } else if down && !was_down {
+                if slot == 0 {
+                    if let Some(friend) = self.clicking.take() {
+                        // the host never waits on a friend: a friend's click still held is let go
+                        // where the host clicks, then the host's click goes through
+                        as_player(player, &rules.privates, friend, |player| {
                             move_mouse(player, x, y);
-                        }
-                        let (vx, vy) = player.stage_to_viewport(x, y);
-                        player.handle_event(PlayerEvent::MouseDown { x: vx, y: vy, button: MouseButton::Left, index: Some(0) });
-                    });
-                    self.clicking = Some(slot);
-                    self.last_clicker = Some(slot);
-                    self.parked = false;
+                            let (vx, vy) = player.stage_to_viewport(x, y);
+                            player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
+                        });
+                        self.release_next = None;
+                        tracing::info!("Ruffle Together: player {}'s held click let go for the host's", friend + 1);
+                    }
+                    self.start_click(player, &rules, park, 0, x, y);
+                } else if self.clicking.is_none() && self.queue.is_empty() {
+                    self.start_click(player, &rules, park, slot, x, y);
+                } else if self.queue.len() < QUEUE_MAX {
+                    // the mouse is busy: this click waits its turn
+                    self.queue.push_back(QueuedClick { slot, x, y, released: false });
+                }
+            } else if !down && was_down {
+                // let go while waiting: the click is still theirs, as a press and a release
+                if let Some(waiting) = self.queue.iter_mut().rev().find(|q| q.slot == slot && !q.released) {
+                    waiting.released = true;
                 }
             }
+        }
+        // a friend holding the button long while others wait is let go
+        match self.clicking {
+            Some(slot) if slot > 0 && !self.queue.is_empty() => {
+                self.held += 1;
+                if self.held > HOLD_MAX
+                    && let Some((x, y, _)) = self.mice[slot as usize]
+                {
+                    tracing::info!("Ruffle Together: player {}'s long click let go for the others", slot + 1);
+                    self.end_click(player, &rules, park, slot, x, y);
+                }
+            }
+            _ => self.held = 0,
+        }
+        // the next waiting clicks, when the mouse is free (a refused one doesn't use it)
+        while self.clicking.is_none()
+            && self.release_next.is_none()
+            && let Some(next) = self.queue.pop_front()
+        {
+            if self.start_click(player, &rules, park, next.slot, next.x, next.y) && next.released {
+                self.release_next = Some((next.slot, next.x, next.y));
+            }
+        }
+    }
+
+    /// Presses the game's mouse button for `slot` at (x, y) (twips) if the rules let them click
+    /// there; false if refused.
+    fn start_click(&mut self, player: &mut Player, rules: &ClickRules, park: bool, slot: u8, x: i32, y: i32) -> bool {
+        let (allowed, target) = as_player(player, &rules.privates, slot, |player| {
+            (may_click(player, rules.mode, &rules.zones, slot, x, y), player.coop_click_target(x, y))
+        });
+        // the game has one of each private screen: while it is someone's, nobody else opens it
+        // (that would take it over)
+        let busy = target.as_deref().and_then(|target| {
+            rules.privates.iter().find_map(|p| {
+                let opener = p.openers.as_deref().is_some_and(|pattern| crate::coop::keymap::path_fits(target, pattern));
+                p.owner.filter(|&owner| owner != slot && opener)
+            })
+        });
+        if let Some(owner) = busy {
+            self.busy.push((slot, owner));
+        }
+        let allowed = allowed && busy.is_none();
+        if rules.mode != MouseMode::Host || !rules.privates.is_empty() {
+            // for key map authors: what each click lands on (zones and private screens name these
+            // paths)
+            let target = target.unwrap_or_else(|| "nothing clickable".into());
+            let verdict = if allowed { "clicks" } else { "may not click" };
+            tracing::info!("Ruffle Together: player {} {verdict} {target} ({}, {})", slot + 1, x / 20, y / 20);
+        }
+        if allowed {
+            as_player(player, &rules.privates, slot, |player| {
+                if slot > 0 || park {
+                    move_mouse(player, x, y);
+                }
+                let (vx, vy) = player.stage_to_viewport(x, y);
+                player.handle_event(PlayerEvent::MouseDown { x: vx, y: vy, button: MouseButton::Left, index: Some(0) });
+            });
+            self.clicking = Some(slot);
+            self.last_clicker = Some(slot);
+            self.parked = false;
+            self.held = 0;
+        }
+        allowed
+    }
+
+    /// Lets go of `slot`'s click at (x, y) (twips), then the game's mouse goes back to the host's
+    /// (or off the stage).
+    fn end_click(&mut self, player: &mut Player, rules: &ClickRules, park: bool, slot: u8, x: i32, y: i32) {
+        as_player(player, &rules.privates, slot, |player| {
+            let (vx, vy) = player.stage_to_viewport(x, y);
+            player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
+        });
+        self.clicking = None;
+        self.held = 0;
+        if park {
+            move_mouse(player, PARKED.0, PARKED.1);
+            self.parked = true;
+        } else if slot > 0
+            && let Some((hx, hy, _)) = self.mouse
+        {
+            as_player(player, &rules.privates, 0, |player| move_mouse(player, hx, hy));
         }
     }
 
@@ -411,6 +490,14 @@ fn may_click(player: &mut Player, mode: MouseMode, zones: &[Zone], slot: u8, x: 
             MouseMode::Buttons => target.is_some(),
             MouseMode::All => true,
         }
+}
+
+/// Who may click what this frame: the mode, the zones (private screens' included) and the
+/// private screens.
+struct ClickRules {
+    mode: MouseMode,
+    zones: Vec<Zone>,
+    privates: Vec<Private>,
 }
 
 /// Runs `f` (mouse events, picking) as player `slot` sees the game: other players' open private
@@ -776,6 +863,76 @@ private: _root.popup")
                 local + 1
             );
         }
+    }
+
+    /// Four players on the click test SWF (a button at 100,100 100x60 that opens a pop-up over
+    /// itself; any press traces "down X,Y"). Clicks that land in the same frame all reach the game,
+    /// one after another in slot order; a friend's zone keeps out another friend; a friend holding
+    /// the button gives way to waiting clicks; a private pop-up is its opener's with four players.
+    #[test]
+    fn four_players_take_turns_on_the_one_mouse() {
+        let swf = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/coop/clicks/Clicks.swf");
+        type Mice = [Option<(i32, i32, bool)>; 4];
+        let run = |rules: &str, frames: &[Mice]| -> (Vec<String>, Stepper) {
+            let movie = ruffle_core::tag_utils::movie_from_path(&swf, None).expect("test swf");
+            let traces = Arc::new(Mutex::new(vec![]));
+            let player = PlayerBuilder::new().with_movie(movie).with_log(Traces(traces.clone())).with_autoplay(true).build();
+            let mut player = player.lock().expect("player");
+            let map = format!("slot 0: FIRE=32\nslot 1: FIRE=32\nslot 2: FIRE=32\nslot 3: FIRE=32\n{rules}");
+            let mut stepper = Stepper::new(Game::parse("t", &map).expect("map").keys(), 4, 0);
+            let rest = |mice: &Mice| -> [InputFrame; 4] {
+                std::array::from_fn(|slot| InputFrame { mouse: mice[slot], ..Default::default() })
+            };
+            let idle: Mice = [Some((200, 200, false)), None, None, None];
+            stepper.step(&mut player, &rest(&idle));
+            for mice in frames {
+                stepper.step(&mut player, &rest(mice));
+            }
+            for _ in 0..3 {
+                stepper.step(&mut player, &rest(frames.last().unwrap_or(&idle)));
+            }
+            let traces = traces.lock().expect("traces").clone();
+            (traces, stepper)
+        };
+        let at = |x: i32, y: i32, down: bool| Some((x * 20, y * 20, down));
+        let host = Some((200, 200, false));
+
+        // three friends click in the same frame: all three reach the game, in slot order
+        let together = [
+            [host, at(300, 250, true), at(310, 250, true), at(320, 250, true)],
+            [host, at(300, 250, false), at(310, 250, false), at(320, 250, false)],
+        ];
+        let (traces, _) = run("mouse: all", &together);
+        assert_eq!(traces, ["down 300,250", "down 310,250", "down 320,250"]);
+
+        // player 3's box keeps out player 4 (and the host); player 3 clicks it
+        let boxed = [
+            [host, None, at(300, 250, true), at(305, 250, true)],
+            [host, None, at(300, 250, false), at(305, 250, false)],
+        ];
+        let (traces, _) = run("mouse: all\nzone 2: 280,230 60x40", &boxed);
+        assert_eq!(traces, ["down 300,250"], "player 4 may not click in player 3's box");
+
+        // player 2 holds the button down; player 3's click waits, then gets its turn
+        let mut held: Vec<Mice> = vec![[host, at(300, 250, true), at(310, 250, true), None]];
+        held.extend(std::iter::repeat_n([host, at(300, 250, true), at(310, 250, false), None], 40));
+        held.push([host, at(300, 250, false), at(310, 250, false), None]);
+        let (traces, _) = run("mouse: all", &held);
+        assert_eq!(traces, ["down 300,250", "down 310,250"], "a long hold gives way");
+
+        // player 3 opens the pop-up: it is theirs; player 2 clicks through it onto the button;
+        // player 4 can't use the pop-up's own button; its owner can
+        let private = [
+            [host, None, at(150, 130, true), None],
+            [host, None, at(150, 130, false), None],
+            [host, at(150, 130, true), None, at(250, 185, true)],
+            [host, at(150, 130, false), None, at(250, 185, false)],
+            [host, None, at(250, 185, true), None],
+            [host, None, at(250, 185, false), None],
+        ];
+        let (traces, stepper) = run("mouse: buttons\nprivate: _root.popup", &private);
+        assert_eq!(traces, ["down 150,130", "button", "down 150,130", "button", "down 250,185", "popup"]);
+        assert_eq!(stepper.api().lock().expect("api").privates[0].owner, None, "closed by its owner");
     }
 
     /// A game's own `coop.keys` map without `mouse:` or `zone` lines keeps the click rules the
