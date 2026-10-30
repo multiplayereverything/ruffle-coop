@@ -31,6 +31,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("air-battle", include_str!("keys/air-battle.keys")),
     ("ultimate-crab-battle", include_str!("keys/ultimate-crab-battle.keys")),
     ("fireboy-watergirl", include_str!("keys/fireboy-watergirl.keys")),
+    ("chaos-faction-2", include_str!("keys/chaos-faction-2.keys")),
 ];
 
 /// A game's key map (`--coop-keys`).
@@ -636,6 +637,21 @@ local: FIRE=27").expect("map");
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::KeyW])), UP);
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::ArrowLeft])), LEFT);
         assert_eq!(fw.local_buttons(&held(&[PhysicalKey::Escape])), MENU);
+    }
+
+    /// Chaos Faction 2: every player presses the game's solo keys on their own PC; P1 sends them as they are, P2
+    /// as numpad codes the mod maps to player 2. Only P1 pauses.
+    #[test]
+    fn chaos_faction_2_keys() {
+        let cf = game("chaos-faction-2");
+        assert_eq!(cf.max_players(), 2);
+        let mut keys = cf.keys();
+        assert_eq!(down_keys(&keys.events(0, FIRE | KEY3)), vec![PhysicalKey::KeyZ, PhysicalKey::ShiftLeft]);
+        assert_eq!(down_keys(&keys.events(1, FIRE | KEY3)), vec![PhysicalKey::Numpad1, PhysicalKey::Numpad0]);
+        assert_eq!(down_keys(&keys.events(0, MENU)), vec![PhysicalKey::Space], "Space pauses");
+        assert!(down_keys(&keys.events(1, MENU)).is_empty(), "only the host pauses");
+        assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyT])), KEY1);
+        assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyD])), KEY2);
     }
 
     #[test]

@@ -94,7 +94,7 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 
 | Feature | What happens |
 |---|---|
-| **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 11 built in) |
+| **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 13 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected, typed text only reaches `coop.typed`; instead each player's key press types its game key's character (from any key map, `coop.keys` included, and in scripts and replays), so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |

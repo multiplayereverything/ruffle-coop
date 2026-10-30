@@ -1,0 +1,8 @@
+# Chaos Faction 2 (Deathmatch, 2 players: P1 "Keyboard 1", P2 "Keyboard 2").
+# In a session the mod pins the game's own key variables to these codes (src/cf2.as), so the game's
+# solo and 2-player key sets and any rebinding in Settings don't matter.
+# FIRE = punch, ALT = kick, KEY1 = taunt, KEY2 = drop weapon, KEY3 = hold to punch while holding a weapon,
+# MENU = pause (host only).
+slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32
+slot 1: UP=104 DOWN=101 LEFT=100 RIGHT=102 FIRE=97 ALT=98 KEY1=105 KEY2=99 KEY3=96
+local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32

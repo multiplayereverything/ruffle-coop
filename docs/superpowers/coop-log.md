@@ -311,3 +311,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
 - Discord presence on (app id 1565524080453755040): two demo windows through the relay, the user's profile showed
   "Ruffle Together / Playing CoopDemo / room 9V8V6 (2 of 2)". Asks for the art asset "logo" (not uploaded yet: a
   "?" shows until it is). Join button still off (no join page yet).
+- Built-in key map `chaos-faction-2` (Chaos Faction 2 session's request, its file verbatim): 2 slots, every
+  player presses the game's solo keys; P2 travels as numpad codes the mod maps to player 2; only P1 pauses
+  (Space). A built-in map and the same `.keys` file get the same id (name + text hash), so both can meet.
+  Tests 149/149, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d; ChaosFaction2_coop.swf match2.txt 3000
+  frames: built-in and file both 1748d03d. Not released yet (next release).
