@@ -18,9 +18,7 @@ Rust. Flash games that two to four people once played on one keyboard become onl
 game on their own PC, and only the key presses and the mouse travel. Every frame runs on every PC with every player's
 input, so the games stay identical with nothing else to sync, and the games themselves don't need to change.
 
-The easiest way to play is the **Multiplayer Mods Launcher**: it keeps Ruffle Together up to date and starts each game
-with the right settings.
-
+The easiest way to play is the **[Multiplayer Mods Launcher](https://www.multiplayereverything.com/)**. It keeps Ruffle Together up to date and starts each game with the right settings.
 ## Games
 
 Built-in key maps (`--coop-keys <name>`):
