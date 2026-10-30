@@ -9,6 +9,7 @@ build in real windows. Run it after any change to the co-op API or the session, 
 | `demo.keys` | Its starting key map (arrows move, Space fires, 1 key maps, 3 camera) |
 | `demo-2p.txt` | A 2-player input script, about 50 s |
 | `demo-2p-windows.txt` | The same three times after a 5 s wait, for watching real windows |
+| `demo-4p.txt`, `demo-4p-windows.txt` | 4 players: three friends click Red, Blue and Green in the same frame (all three reach the game, one a frame), player 4 is refused on Bob's switch, Bob turns it on |
 
 ## What it shows
 
@@ -22,6 +23,8 @@ build in real windows. Run it after any change to the co-op API or the session, 
 - A name board from `coop.typed` (Backspace works, Enter makes it the label).
 - KEY1 switches the game's key map with `coop.keys` (menu: FIRE = Enter, play: FIRE = Space); the HUD lists
   the key codes the game got.
+- Red, Blue and Green buttons anyone may click (`coop.mouse("buttons")`) and Bob's switch only player 2 may
+  click (`coop.zone`); the HUD shows each player's last click (`coop.clicked`), each window the other's cursor.
 - The events log (`coop.events`) shows join, chat and leave.
 
 Gameplay reads only shared answers; `localSlot`, `isHost` and `ping` only reach the HUD's text.

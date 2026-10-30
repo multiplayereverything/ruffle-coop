@@ -23,6 +23,60 @@ pub fn find<'gc>(context: &UpdateContext<'gc>, path: &str) -> Option<DisplayObje
     Some(object)
 }
 
+/// The path of `object` in the form `find` reads: `_root`, then instance names joined by dots.
+pub fn path_of<'gc>(context: &UpdateContext<'gc>, object: DisplayObject<'gc>) -> String {
+    let root = context.stage.root_clip();
+    let mut names = vec![];
+    let mut current = Some(object);
+    while let Some(o) = current {
+        if root.is_some_and(|root| DisplayObject::ptr_eq(root, o)) {
+            break;
+        }
+        names.push(o.name().map(|n| n.to_utf8_lossy().into_owned()).unwrap_or_default());
+        current = o.parent();
+    }
+    names.push("_root".into());
+    names.reverse();
+    names.join(".")
+}
+
+/// Whether the clip at `path` is on show (it exists and it and its parents are visible).
+pub fn shown(context: &UpdateContext<'_>, path: &str) -> bool {
+    let Some(object) = find(context, path) else {
+        return false;
+    };
+    let mut current = Some(object);
+    while let Some(o) = current {
+        if !o.visible() {
+            return false;
+        }
+        current = o.parent();
+    }
+    true
+}
+
+/// Whether the stage point (x, y) (twips) is on the clip at `path` (in its bounds).
+pub fn covers(context: &UpdateContext<'_>, path: &str, x: Twips, y: Twips) -> bool {
+    find(context, path).is_some_and(|object| {
+        let bounds = object.world_bounds(BoundsMode::Engine);
+        x >= bounds.x_min && x < bounds.x_max && y >= bounds.y_min && y < bounds.y_max
+    })
+}
+
+/// Whether this PC draws the clip at `path` (another player's private screen isn't drawn).
+pub fn set_drawn(context: &UpdateContext<'_>, path: &str, drawn: bool) -> bool {
+    find(context, path).map(|object| object.base().set_coop_not_drawn(!drawn)).is_some()
+}
+
+/// Takes the clip at `path` out of mouse picking (or puts it back): a player's mouse goes
+/// through another player's private screen. Returns whether it was visible, to put back.
+pub fn set_pickable(context: &UpdateContext<'_>, path: &str, pickable: bool) -> Option<bool> {
+    let object = find(context, path)?;
+    let was = object.visible();
+    object.base().set_visible_for_picking(pickable);
+    Some(was)
+}
+
 /// Marks the clip at `path` as HUD (drawn without the camera); false if there is none.
 pub fn set_hud(context: &mut UpdateContext<'_>, path: &str) -> bool {
     find(context, path).map(|object| object.set_coop_hud(true)).is_some()

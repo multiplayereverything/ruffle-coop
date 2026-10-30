@@ -502,9 +502,12 @@ impl MainWindow {
             PlayerEvent::MouseMove { x, y }
             | PlayerEvent::MouseDown { x, y, .. }
             | PlayerEvent::MouseUp { x, y, .. } => {
+                use ruffle_core::events::MouseButton;
+                // only the left button clicks the game (a right click opens Ruffle's menu, which
+                // swallows its release)
                 let down = match event {
-                    PlayerEvent::MouseDown { .. } => Some(true),
-                    PlayerEvent::MouseUp { .. } => Some(false),
+                    PlayerEvent::MouseDown { button: MouseButton::Left, .. } => Some(true),
+                    PlayerEvent::MouseUp { button: MouseButton::Left, .. } => Some(false),
                     _ => None,
                 };
                 if let Some(mut player) = self.player.get() {

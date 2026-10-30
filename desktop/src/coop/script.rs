@@ -8,6 +8,8 @@
 //! click 275 300   host mouse: one frame pressed at stage pixel (275, 300), then released
 //! move 100 50     host mouse moves (no click)
 //! move 100 50 2   player 2's mouse (any of click/move; the host's when left out)
+//! press 100 50 2  player 2's mouse moves there and holds its button (no frame passes, so several
+//! release 2        players can press in the same frame); release lets go (no frame passes)
 //! type 1 Sam{Enter}  player 1 types "Sam" then Enter (8 characters a frame; {Backspace} too)
 //! ```
 
@@ -37,7 +39,18 @@ impl Script {
                     let n = int(1)?;
                     frames.extend(std::iter::repeat_n(now, n.max(0) as usize));
                 }
-                "click" | "move" => {
+                "release" => {
+                    let slot = match words.get(1) {
+                        Some(_) => int(1)? as usize,
+                        None => 0,
+                    };
+                    if slot >= MAX_PLAYERS {
+                        return Err(fail("unknown player"));
+                    }
+                    let (x, y, _) = now[slot].mouse.ok_or_else(|| fail("that player's mouse never moved"))?;
+                    now[slot].mouse = Some((x, y, false));
+                }
+                "click" | "move" | "press" => {
                     let (x, y) = (int(1)? * 20, int(2)?.saturating_mul(20));
                     // a slot's mouse (default: the host's)
                     let slot = match words.get(3) {
@@ -51,7 +64,7 @@ impl Script {
                         now[slot].mouse = Some((x, y, true));
                         frames.push(now);
                     }
-                    now[slot].mouse = Some((x, y, false));
+                    now[slot].mouse = Some((x, y, words[0] == "press"));
                 }
                 "type" => {
                     let slot = int(1)? as usize;
@@ -117,6 +130,22 @@ impl Script {
 mod tests {
     use super::*;
     use crate::coop::lockstep::{FIRE, KEY1, LEFT, NO, UP, VIEW};
+
+    /// press/release let several players hold their buttons in the same frame.
+    #[test]
+    fn players_press_in_the_same_frame() {
+        let script = Script::parse("press 10 20 1
+press 30 40 2
+wait 1
+release 1
+release 2
+wait 1").expect("parse");
+        assert_eq!(script.input(0, 1).mouse, Some((200, 400, true)));
+        assert_eq!(script.input(0, 2).mouse, Some((600, 800, true)));
+        assert_eq!(script.input(1, 1).mouse, Some((200, 400, false)));
+        assert_eq!(script.input(1, 2).mouse, Some((600, 800, false)));
+        assert!(Script::parse("release 3").is_err(), "that mouse never moved");
+    }
 
     #[test]
     fn type_types_text_once_eight_characters_a_frame() {

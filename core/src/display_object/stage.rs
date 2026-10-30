@@ -92,6 +92,12 @@ pub struct StageData<'gc> {
     /// screen only (never in `BitmapData.draw`), so it changes the picture and not the game.
     coop_camera: Cell<Matrix>,
 
+    /// Ruffle Together: the button this PC draws in its Over state (this player's own hover).
+    coop_hovered: Lock<Option<DisplayObject<'gc>>>,
+
+    /// Ruffle Together: buttons are drawn by this PC's own player's hover (`hover: own`).
+    coop_own_hover: Cell<bool>,
+
     /// Matrix used for rendering the letterbox.
     ///
     /// It represents the transformation of the whole window into the
@@ -192,6 +198,8 @@ impl<'gc> Stage<'gc> {
                 movie: Lock::new(movie),
                 viewport_matrix: Cell::new(Matrix::IDENTITY),
                 coop_camera: Cell::new(Matrix::IDENTITY),
+                coop_hovered: Lock::new(None),
+                coop_own_hover: Cell::new(false),
                 letterbox_matrix: Cell::new(Matrix::IDENTITY),
                 focus_tracker: FocusTracker::new(gc_context),
             },
@@ -219,6 +227,24 @@ impl<'gc> Stage<'gc> {
 
     pub fn view_matrix(self) -> Matrix {
         self.0.viewport_matrix.get()
+    }
+
+    /// Ruffle Together: the button this PC draws in its Over state, if any.
+    pub fn coop_hovered(self) -> Option<DisplayObject<'gc>> {
+        self.0.coop_hovered.get()
+    }
+
+    pub fn set_coop_hovered(self, mc: &Mutation<'gc>, hovered: Option<DisplayObject<'gc>>) {
+        unlock!(Gc::write(mc, self.0), StageData, coop_hovered).set(hovered);
+    }
+
+    /// Ruffle Together: whether buttons are drawn by this PC's own player's hover.
+    pub fn coop_own_hover(self) -> bool {
+        self.0.coop_own_hover.get()
+    }
+
+    pub fn set_coop_own_hover(self, on: bool) {
+        self.0.coop_own_hover.set(on);
     }
 
     pub fn coop_camera(self) -> Matrix {

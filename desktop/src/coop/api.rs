@@ -6,6 +6,17 @@
 //! ExternalInterface.call("coop.mouseX", slot)    that slot's mouse, stage pixels (same space as _root._xmouse)
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
+//! ExternalInterface.call("coop.clicked", slot)   true on the frame that slot pressed its left button
+//! ExternalInterface.call("coop.mouse", mode)     who may click the game: "host", "zones" (friends only in
+//!                                                their own zone), "buttons" (friends on clickable things
+//!                                                too) or "all"
+//! ExternalInterface.call("coop.zone", slot, x, y, w, h)  only that slot may click in the box; (slot) clears its boxes
+//! ExternalInterface.call("coop.only", path)      a private screen: only the player who opened it sees and clicks it
+//! ExternalInterface.call("coop.only", slot, path)  ... only that slot; coop.shared(path) makes it everyone's again
+//! ExternalInterface.call("coop.only", path, pattern)  ... and while it is someone's, nobody else may click the
+//!                                                buttons that open it (pattern: "_root.players.*.instance*")
+//! ExternalInterface.call("coop.hover", mode)     "host": the game's own hover follows the host (the default),
+//!                                                "own": Button symbols' Over art follows each player's mouse, "off"
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
@@ -35,7 +46,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat", "clicks", "zones", "private", "hover"];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;
@@ -51,6 +62,21 @@ pub struct Camera {
     pub zoom: f64,
 }
 
+/// A private screen: the clip at `path` belongs to one player while it is on show (`fixed`, or
+/// whoever's click opened it): only their PC draws it, only they click it, and everyone else's
+/// mouse goes through it. The game still has it on every PC; only the picture and the mouse
+/// differ, the same way on every PC.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Private {
+    pub path: String,
+    pub fixed: Option<u8>,
+    /// The buttons that open it (a path pattern): while it is someone's, nobody else may click
+    /// them (the game has one of it).
+    pub openers: Option<String>,
+    /// Whose it is while it is on show.
+    pub owner: Option<u8>,
+}
+
 /// A name tag that Ruffle draws above a clip.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Label {
@@ -64,6 +90,16 @@ pub struct CoopApi {
     pub local_slot: u8,
     /// Each slot's mouse (stage twips) and left button, as of the frame that runs now.
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
+    /// Each slot pressed its left button this frame (`coop.clicked`).
+    pub clicked: [bool; MAX_PLAYERS],
+    /// Who may click the game, and the boxes only one player may click: the key map's at first,
+    /// then whatever the game says (`coop.mouse`, `coop.zone`).
+    pub mouse_mode: crate::coop::keymap::MouseMode,
+    pub zones: Vec<crate::coop::keymap::Zone>,
+    /// Private screens: drawn only on their owner's PC, clicked only by them.
+    pub privates: Vec<Private>,
+    /// How hover works while friends may click (None: the host's, as in the game).
+    pub hover: Option<crate::coop::keymap::Hover>,
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
     /// What happened that the game hasn't read yet (`coop.events`), oldest first.
@@ -95,6 +131,11 @@ impl CoopApi {
             players,
             local_slot,
             mouse: [(0, 0, false); MAX_PLAYERS],
+            clicked: [false; MAX_PLAYERS],
+            mouse_mode: Default::default(),
+            zones: vec![],
+            privates: vec![],
+            hover: None,
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
             options: vec![],
@@ -118,9 +159,11 @@ impl CoopApi {
         for (slot, input) in inputs.iter().enumerate().take(MAX_PLAYERS) {
             self.buttons[slot] = input.buttons;
             self.typed[slot] = input.text;
+            let was_down = self.mouse[slot].2;
             if let Some(mouse) = input.mouse {
                 self.mouse[slot] = mouse;
             }
+            self.clicked[slot] = self.mouse[slot].2 && !was_down;
         }
     }
 
@@ -159,6 +202,35 @@ impl CoopApi {
             ("coop.mouseX", Some(slot)) => Value::Number(self.mouse[slot].0 as f64 / 20.0),
             ("coop.mouseY", Some(slot)) => Value::Number(self.mouse[slot].1 as f64 / 20.0),
             ("coop.mouseDown", Some(slot)) => Value::Bool(self.mouse[slot].2),
+            ("coop.clicked", Some(slot)) => Value::Bool(self.clicked[slot]),
+            ("coop.mouse", _) => match text(0).and_then(|mode| crate::coop::keymap::MouseMode::named(&mode)) {
+                Some(mode) => {
+                    self.mouse_mode = mode;
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.zone", Some(slot)) => match (number(1), number(2), number(3), number(4)) {
+                (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
+                    let area = crate::coop::keymap::ZoneArea::Box { x, y, width, height };
+                    self.zones.push(crate::coop::keymap::Zone { slot: slot as u8, area });
+                    Value::Bool(true)
+                }
+                _ if args.len() == 2 && text(1).is_some() => {
+                    match text(1).and_then(|path| crate::coop::keymap::Zone::parse(slot as u8, &path)) {
+                        Some(zone) => {
+                            self.zones.push(zone);
+                            Value::Bool(true)
+                        }
+                        None => Value::Bool(false),
+                    }
+                }
+                (None, None, None, None) if args.len() == 1 => {
+                    self.zones.retain(|zone| zone.slot as usize != slot);
+                    Value::Bool(true)
+                }
+                _ => Value::Bool(false),
+            },
             ("coop.typed", Some(slot)) => {
                 self.typed_read_at = Some(self.frame);
                 let text: String = self.typed[slot]
@@ -184,6 +256,30 @@ impl CoopApi {
             ("coop.options", _) => Value::Object(
                 self.options.iter().map(|(n, v)| (n.clone(), Value::String(v.clone()))).collect(),
             ),
+            ("coop.only", _) => {
+                let (fixed, path, openers) = match (slot, text(0), text(1)) {
+                    (Some(slot), _, Some(path)) => (Some(slot as u8), path, None),
+                    (_, Some(path), openers) => (None, path, openers),
+                    _ => return Value::Bool(false),
+                };
+                self.privates.retain(|private| private.path != path);
+                self.privates.push(Private { path, fixed, openers, owner: None });
+                Value::Bool(true)
+            }
+            ("coop.hover", _) => match text(0).and_then(|mode| crate::coop::keymap::Hover::named(&mode)) {
+                Some(hover) => {
+                    self.hover = Some(hover);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.shared", _) => match text(0) {
+                Some(path) => {
+                    self.privates.retain(|private| private.path != path);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
             ("coop.buttons", Some(slot)) => Value::Number(self.buttons[slot].into()),
             ("coop.button", Some(slot)) => match text(1).and_then(|name| crate::coop::lockstep::button_named(&name)) {
                 Some(button) => Value::Bool(self.buttons[slot] & button != 0),
@@ -269,6 +365,40 @@ impl ExternalInterfaceProvider for CoopApiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `coop.clicked` is true on the press frame only; `coop.mouse` and `coop.zone` change the
+    /// click rules, `coop.zone(slot)` clears that slot's boxes.
+    #[test]
+    fn clicks_and_click_rules() {
+        use crate::coop::keymap::MouseMode;
+        let mut api = CoopApi::new(2, 0);
+        let mouse = |down| InputFrame { mouse: Some((100, 100, down)), ..Default::default() };
+        api.update(&[InputFrame::default(), mouse(true)]);
+        assert_eq!(api.answer("coop.clicked", &[Value::Number(1.0)]), Value::Bool(true));
+        api.update(&[InputFrame::default(), mouse(true)]);
+        assert_eq!(api.answer("coop.clicked", &[Value::Number(1.0)]), Value::Bool(false), "held, not a new click");
+        assert_eq!(api.answer("coop.mouse", &[Value::String("buttons".into())]), Value::Bool(true));
+        assert_eq!(api.mouse_mode, MouseMode::Buttons);
+        assert_eq!(api.answer("coop.mouse", &[Value::String("nobody".into())]), Value::Bool(false));
+        let zone = [1.0, 10.0, 20.0, 30.0, 40.0].map(Value::Number);
+        assert_eq!(api.answer("coop.zone", &zone), Value::Bool(true));
+        assert_eq!(api.zones.len(), 1);
+        assert_eq!(api.answer("coop.zone", &[Value::Number(1.0)]), Value::Bool(true));
+        assert!(api.zones.is_empty());
+        // private screens: whoever opens it, or a fixed player; coop.shared ends it
+        assert_eq!(api.answer("coop.only", &[Value::String("_root.notes".into())]), Value::Bool(true));
+        assert_eq!(api.answer("coop.only", &[Value::Number(1.0), Value::String("_root.shop".into())]), Value::Bool(true));
+        let privates: Vec<_> = api.privates.iter().map(|p| (p.path.as_str(), p.fixed)).collect();
+        assert_eq!(privates, [("_root.notes", None), ("_root.shop", Some(1))]);
+        assert_eq!(api.answer("coop.shared", &[Value::String("_root.notes".into())]), Value::Bool(true));
+        assert_eq!(api.privates.len(), 1);
+        assert_eq!(api.answer("coop.only", &[]), Value::Bool(false));
+        let with_openers = [Value::String("_root.pcb".into()), Value::String("_root.players.*.instance*".into())];
+        assert_eq!(api.answer("coop.only", &with_openers), Value::Bool(true));
+        assert_eq!(api.privates.last().and_then(|p| p.openers.as_deref()), Some("_root.players.*.instance*"));
+        assert_eq!(api.answer("coop.hover", &[Value::String("host".into())]), Value::Bool(true));
+        assert_eq!(api.hover, Some(crate::coop::keymap::Hover::Host));
+    }
 
     fn n(v: f64) -> Value {
         Value::Number(v)

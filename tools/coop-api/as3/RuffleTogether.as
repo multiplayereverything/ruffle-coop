@@ -54,6 +54,38 @@ package {
         public static function mouseY(slot:int):Number { return active() ? Number(send("coop.mouseY", slot)) : NaN; }
         public static function mouseDown(slot:int):Boolean { return active() && send("coop.mouseDown", slot) == true; }
 
+        /** True on the frame that player pressed their left button. */
+        public static function clicked(slot:int):Boolean { return send("coop.clicked", slot) == true; }
+
+        /** Who may click the game: "host" (the default), "zones" (friends only in their own zone), "buttons" (friends on clickable things) or "all". */
+        public static function mouse(mode:String):Boolean { return send("coop.mouse", mode) == true; }
+
+        /** A box (stage pixels) only that player may click. */
+        public static function zone(slot:int, x:Number, y:Number, w:Number, h:Number):Boolean {
+            return send("coop.zone", slot, x, y, w, h) == true;
+        }
+
+        /** The buttons inside the clip at path ("_root.players.p2") belong to that player, while it is on show. */
+        public static function zoneClip(slot:int, path:String):Boolean { return send("coop.zone", slot, path) == true; }
+
+        /** A private screen: the clip at path is seen and clicked only by the player whose click opened it. */
+        public static function only(path:String):Boolean { return send("coop.only", path) == true; }
+
+        /** A private screen that is always that player's. */
+        public static function onlyFor(slot:int, path:String):Boolean { return send("coop.only", slot, path) == true; }
+
+        /** A private screen, and while it is someone's nobody else may click the buttons that open it ("_root.players.*.instance*"). */
+        public static function onlyOpenedBy(path:String, pattern:String):Boolean { return send("coop.only", path, pattern) == true; }
+
+        /** Where the game's mouse rests between clicks while friends may click: "off" (no hover for anyone) or "host". */
+        public static function hover(mode:String):Boolean { return send("coop.hover", mode) == true; }
+
+        /** Everyone sees and clicks the clip at path again. */
+        public static function shared(path:String):Boolean { return send("coop.shared", path) == true; }
+
+        /** Clears that player's zones. */
+        public static function zoneOff(slot:int):Boolean { return send("coop.zone", slot) == true; }
+
         /** Slot's camera: stage point (x, y) at the middle of that player's screen, zoom 1 = normal. Call it for every slot. */
         public static function camera(slot:int, x:Number, y:Number, zoom:Number = 1):Boolean {
             return send("coop.camera", slot, x, y, zoom) == true;

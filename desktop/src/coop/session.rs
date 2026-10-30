@@ -826,6 +826,10 @@ impl Session {
         self.focused = focused;
         if !focused {
             self.held.clear();
+            // a window that loses focus lets go of its mouse button too (its release may never come)
+            if let Some((x, y, true)) = self.mouse {
+                self.mouse = Some((x, y, false));
+            }
         }
     }
 
@@ -983,7 +987,17 @@ impl Session {
                     }
                 }
             }
+            // this player's own hover: their live mouse (a script's when scripted)
+            let own = self.mouse.or_else(|| inputs.get(self.local_index as usize).and_then(|input| input.mouse));
+            self.stepper.set_local_mouse(own.map(|(x, y, _)| (x, y)));
             self.stepper.step(player, &inputs);
+            for (who, whose) in self.stepper.take_busy() {
+                if who == self.local_index {
+                    let text = format!("{} has that open: wait until they close it", self.name(whose));
+                    tracing::info!("Ruffle Together: {text}");
+                    self.notice = Some((text, Instant::now()));
+                }
+            }
             self.heartbeat.step_started.store(0, Ordering::Relaxed);
             let took = step_started.elapsed();
             if took > SLOW_FRAME {
@@ -1193,6 +1207,17 @@ impl Session {
             };
         }
         pings
+    }
+
+    /// The other players' cursors (name, slot, stage twips, button), only while one is over
+    /// something that player may click.
+    pub fn friend_cursors(&self, player: &mut ruffle_core::Player) -> Vec<(String, u8, i32, i32, bool)> {
+        self.stepper
+            .friend_cursors(player)
+            .into_iter()
+            .filter(|&(slot, ..)| !self.lockstep.is_gone(slot))
+            .map(|(slot, x, y, down)| (self.name(slot), slot, x, y, down))
+            .collect()
     }
 
     /// The name tags the game asked for (`coop.label`), for the window to draw.

@@ -1,0 +1,41 @@
+# Four players drive the API demo (about 25 s at 30 fps). Every PC runs this file; each takes its own slot.
+wait 60
+type 0 Ann{Enter}
+type 1 Bob{Enter}
+type 2 Cat{Enter}
+type 3 Dan{Enter}
+wait 30
+# players 2, 3 and 4 click Red, Blue and Green in the same frame: all three reach the game, in turn
+move 275 405 1
+move 415 405 2
+move 555 405 3
+wait 20
+press 275 405 1
+press 415 405 2
+press 555 405 3
+wait 2
+release 1
+release 2
+release 3
+wait 40
+# player 4 tries Bob's switch: refused (player 2's zone); then Bob turns it on
+click 695 405 3
+wait 30
+click 695 405 1
+wait 40
+# everyone walks; each camera follows its own dot
+p0 RIGHT
+p1 DOWN
+p2 LEFT
+p3 UP
+wait 90
+p0 FIRE
+p1 FIRE
+p2 FIRE
+p3 FIRE
+wait 30
+p0 0
+p1 0
+p2 0
+p3 0
+wait 60

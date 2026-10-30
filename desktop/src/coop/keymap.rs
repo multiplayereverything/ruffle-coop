@@ -9,6 +9,17 @@
 //! slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
 //! slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
 //! local: UP=38,87 DOWN=40,83 FIRE=90,84     keys a player presses on their own PC, per button
+//! mouse: buttons                            who may click: host (the default), zones (friends only
+//!                                           in their own zone), buttons (friends on what the game
+//!                                           made clickable), all
+//! zone 1: _root.players.p2                  only player 2 may click the buttons in this clip (only
+//!                                           while it is on show; the most exact clip wins)
+//! zone 1: 290,95 200x190                    or in this box (stage pixels, on every screen)
+//! private: _root.pcb                        a pop-up only the player who opened it sees and clicks;
+//!   opened-by _root.players.*.instance*     ... and nobody else opens it while it is theirs
+//! hover: host                               the game's own hover follows the host's mouse, on every
+//!                                           screen (the default); own: Button symbols' own Over art
+//!                                           follows each player's mouse on their screen; off: none
 //! ```
 
 use crate::coop::lockstep::{MAX_PLAYERS, button_named};
@@ -45,6 +56,157 @@ pub struct Game {
     slots: Vec<Vec<(u16, u32)>>,
     /// (key code a player presses, button).
     local: Vec<(u32, u16)>,
+    /// The map's `mouse:` line, if it has one.
+    mouse: Option<MouseMode>,
+    zones: Vec<Zone>,
+    /// Clips that are private screens (`private:`), with the buttons that open them.
+    privates: Vec<(String, Option<String>)>,
+    hover: Option<Hover>,
+}
+
+/// How hover works while friends may click (`hover:` in a key map, or the game's `coop.hover`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hover {
+    /// The game's mouse follows the host's, and each PC draws Button symbols in the game's own
+    /// Up/Over art by its own player's mouse (the picture only).
+    Own,
+    /// The game's mouse follows the host's: the game's own hover, the host's, on every screen
+    /// (the default).
+    Host,
+    /// The game's mouse rests off the stage: no hover anywhere.
+    Off,
+}
+
+impl Hover {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "own" => Some(Self::Own),
+            "host" => Some(Self::Host),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the clip path `target` fits `pattern`: the same number of names, each the same, or
+/// `*` (any name), or ending in `*` (any name starting so): `_root.players.*.instance*`.
+pub fn path_fits(target: &str, pattern: &str) -> bool {
+    let (mut target, mut pattern) = (target.split('.'), pattern.split('.'));
+    loop {
+        match (target.next(), pattern.next()) {
+            (None, None) => return true,
+            (Some(name), Some(want)) => {
+                let fits = match want.strip_suffix('*') {
+                    Some(start) => name.starts_with(start),
+                    None => name == want,
+                };
+                if !fits {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Who may click the game (`mouse:` in a key map, or the game's `coop.mouse`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MouseMode {
+    /// Only the host's mouse reaches the game (every PC still knows every player's mouse).
+    #[default]
+    Host,
+    /// A friend's clicks only inside their own zone (and on something clickable there): a
+    /// character screen where each player picks on their own card. The host clicks everywhere
+    /// but other players' zones.
+    Zones,
+    /// Every player's clicks, but a friend's only on something the game made clickable (what
+    /// shows the hand cursor).
+    Buttons,
+    /// Every player's clicks, anywhere.
+    All,
+}
+
+impl MouseMode {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "host" => Some(Self::Host),
+            "zones" => Some(Self::Zones),
+            "buttons" => Some(Self::Buttons),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+/// Something only one player may click: the buttons inside a clip (a player's card; only while
+/// it is on show), or a box on the stage (on every screen).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Zone {
+    pub slot: u8,
+    pub area: ZoneArea,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ZoneArea {
+    /// `_root.players.p2`: what is clicked is this clip or inside it.
+    Clip(String),
+    /// Stage pixels.
+    Box { x: f64, y: f64, width: f64, height: f64 },
+}
+
+impl Zone {
+    /// How exactly the zone covers a click at (x, y) (twips) on `target` (the path of what is
+    /// clicked, if anything): None if it doesn't; a deeper clip covers more exactly than a
+    /// shallower one, and any clip more exactly than a box.
+    fn covers(&self, x: i32, y: i32, target: Option<&str>) -> Option<usize> {
+        match &self.area {
+            ZoneArea::Clip(path) => target
+                .filter(|target| {
+                    *target == path || target.strip_prefix(path.as_str()).is_some_and(|rest| rest.starts_with('.'))
+                })
+                .map(|_| 1 + path.split('.').count()),
+            ZoneArea::Box { x: bx, y: by, width, height } => {
+                let (x, y) = (x as f64 / 20.0, y as f64 / 20.0);
+                (x >= *bx && y >= *by && x < bx + width && y < by + height).then_some(0)
+            }
+        }
+    }
+
+    /// Who a click belongs to: the players of the most exact zones that cover it (none: it
+    /// belongs to nobody in particular).
+    fn owners(zones: &[Zone], x: i32, y: i32, target: Option<&str>) -> Vec<u8> {
+        let covering: Vec<(usize, u8)> =
+            zones.iter().filter_map(|zone| Some((zone.covers(x, y, target)?, zone.slot))).collect();
+        let best = covering.iter().map(|(exact, _)| *exact).max();
+        covering.into_iter().filter(|(exact, _)| Some(*exact) == best).map(|(_, slot)| slot).collect()
+    }
+
+    /// May `slot` click there? Not where it belongs to someone else.
+    pub fn allows(zones: &[Zone], slot: u8, x: i32, y: i32, target: Option<&str>) -> bool {
+        let owners = Self::owners(zones, x, y, target);
+        owners.is_empty() || owners.contains(&slot)
+    }
+
+    /// Is it `slot`'s own?
+    pub fn is_own(zones: &[Zone], slot: u8, x: i32, y: i32, target: Option<&str>) -> bool {
+        Self::owners(zones, x, y, target).contains(&slot)
+    }
+
+    /// `X,Y WxH` (stage pixels) or a clip path (`_root.players.p2`).
+    pub fn parse(slot: u8, text: &str) -> Option<Self> {
+        let text = text.trim();
+        let area = if text.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+            let (at, size) = text.split_once(' ')?;
+            let (x, y) = at.split_once(',')?;
+            let (width, height) = size.trim().split_once('x')?;
+            ZoneArea::Box { x: x.parse().ok()?, y: y.parse().ok()?, width: width.parse().ok()?, height: height.parse().ok()? }
+        } else if !text.is_empty() && !text.contains(char::is_whitespace) {
+            ZoneArea::Clip(text.to_string())
+        } else {
+            return None;
+        };
+        Some(Self { slot, area })
+    }
 }
 
 impl Game {
@@ -77,6 +239,10 @@ impl Game {
             shared: false,
             slots: vec![],
             local: vec![],
+            mouse: None,
+            zones: vec![],
+            privates: vec![],
+            hover: None,
         };
         for (number, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
@@ -103,6 +269,28 @@ impl Game {
                 continue;
             } else if line == "shared" {
                 game.shared = true;
+            } else if let Some(mode) = line.strip_prefix("mouse:") {
+                game.mouse = MouseMode::named(mode.trim()).map(Some).ok_or_else(|| fail(format!("mouse is host, zones, buttons or all: {mode}")))?;
+            } else if let Some(rest) = line.strip_prefix("zone ") {
+                let zone = (|| {
+                    let (slot, rest) = rest.split_once(':')?;
+                    let slot = slot.trim().parse::<u8>().ok().filter(|&s| (s as usize) < MAX_PLAYERS)?;
+                    Zone::parse(slot, rest)
+                })()
+                .ok_or_else(|| fail("expected zone N: X,Y WxH or zone N: _root.clip".into()))?;
+                game.zones.push(zone);
+            } else if let Some(rest) = line.strip_prefix("private:") {
+                let (path, openers) = match rest.split_once(" opened-by ") {
+                    Some((path, openers)) => (path.trim(), Some(openers.trim())),
+                    None => (rest.trim(), None),
+                };
+                let one_name = |text: &str| !text.is_empty() && !text.contains(char::is_whitespace);
+                if !one_name(path) || openers.is_some_and(|o| !one_name(o)) {
+                    return Err(fail("expected private: _root.clip (opened-by _root.pattern)".into()));
+                }
+                game.privates.push((path.to_string(), openers.map(str::to_string)));
+            } else if let Some(hover) = line.strip_prefix("hover:") {
+                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is own, host or off: {hover}")))?);
             } else if let Some(list) = line.strip_prefix("local:") {
                 for (button, codes) in pairs(list)? {
                     game.local.extend(codes.into_iter().map(|code| (code, button)));
@@ -159,6 +347,10 @@ impl Game {
             held: vec![0; slots.len()],
             slots,
             shared: self.shared,
+            mouse: self.mouse,
+            zones: self.zones.clone(),
+            privates: self.privates.clone(),
+            hover: self.hover,
         }
     }
 
@@ -249,6 +441,14 @@ pub struct GameKeys {
     held: Vec<u16>,
     /// Every slot presses the same keys (a hot-seat game): a key is down while any player holds it.
     shared: bool,
+    /// Who may click, and the boxes only one player may click (the map's `mouse:` and `zone`;
+    /// None and no boxes when it says nothing, so a game's own `coop.keys` map keeps the rules).
+    pub mouse: Option<MouseMode>,
+    pub zones: Vec<Zone>,
+    /// The map's private screens (`private:`), with the buttons that open them.
+    pub privates: Vec<(String, Option<String>)>,
+    /// Where the game's mouse rests between clicks (`hover:`), if the map says.
+    pub hover: Option<Hover>,
 }
 
 impl GameKeys {
@@ -293,6 +493,50 @@ impl GameKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `mouse:` and `zone` lines: who may click, and boxes only one player may click.
+    #[test]
+    fn mouse_rules_and_zones() {
+        let game = Game::parse("t", "slot 0: FIRE=32
+mouse: buttons
+zone 1: 290,95 200x190").expect("map");
+        let keys = game.keys();
+        assert_eq!(keys.mouse, Some(MouseMode::Buttons));
+        let zone = Zone { slot: 1, area: ZoneArea::Box { x: 290.0, y: 95.0, width: 200.0, height: 190.0 } };
+        assert_eq!(keys.zones, [zone]);
+        let px = |p: i32| p * 20;
+        assert!(Zone::allows(&keys.zones, 1, px(300), px(100), None), "its owner");
+        assert!(!Zone::allows(&keys.zones, 0, px(300), px(100), None), "anyone else");
+        assert!(Zone::allows(&keys.zones, 0, px(10), px(10), None), "outside every box");
+        // clips: only what is clicked inside them, the most exact clip wins
+        let clips = Game::parse("t", "slot 0: FIRE=32\nzone 1: _root.players.p2\nzone 0: _root.players.p2.combo")
+            .expect("map")
+            .keys()
+            .zones;
+        assert!(Zone::is_own(&clips, 1, 0, 0, Some("_root.players.p2.b10")));
+        assert!(!Zone::allows(&clips, 0, 0, 0, Some("_root.players.p2.b10")), "the host stays off it");
+        assert!(Zone::is_own(&clips, 0, 0, 0, Some("_root.players.p2.combo.instance614")), "the drop-down is the host's");
+        assert!(!Zone::allows(&clips, 1, 0, 0, Some("_root.players.p2.combo")));
+        assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.players.p20")), "not a clip inside it");
+        assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.startbutton")) && !Zone::is_own(&clips, 1, 0, 0, Some("_root.startbutton")));
+        assert!(Zone::allows(&clips, 0, 0, 0, None), "nothing clicked there");
+        let private = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb\nhover: host").expect("map").keys();
+        assert_eq!(private.privates, [("_root.pcb".to_string(), None)]);
+        assert_eq!(private.hover, Some(Hover::Host));
+        let opened = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb opened-by _root.players.*.instance*").expect("map");
+        assert_eq!(opened.keys().privates, [("_root.pcb".to_string(), Some("_root.players.*.instance*".to_string()))]);
+        assert!(Game::parse("t", "slot 0: FIRE=32\nprivate:").is_err());
+        assert!(Game::parse("t", "slot 0: FIRE=32\nhover: maybe").is_err());
+        assert!(path_fits("_root.players.p1.instance189", "_root.players.*.instance*"));
+        assert!(!path_fits("_root.players.p1.b9", "_root.players.*.instance*"), "an arrow");
+        assert!(!path_fits("_root.players.p2.combo.instance614", "_root.players.*.instance*"), "deeper");
+        assert!(!path_fits("_root.pcb.instance244", "_root.players.*.instance*"));
+        assert_eq!(Game::parse("t", "slot 0: FIRE=32").expect("map").keys().mouse, None);
+        assert!(Game::parse("t", "slot 0: FIRE=32
+mouse: some").is_err());
+        assert!(Game::parse("t", "slot 0: FIRE=32
+zone 9: 1,2 3x4").is_err());
+    }
     use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, MENU, NO, QUIT, RIGHT, UP, VIEW, YES, button_named};
 
     fn game(name: &str) -> Game {
@@ -652,6 +896,15 @@ local: FIRE=27").expect("map");
         assert!(down_keys(&keys.events(1, MENU)).is_empty(), "only the host pauses");
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyT])), KEY1);
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyD])), KEY2);
+        // the character screen: friends click their own card, the P2 drop-down is the host's
+        assert_eq!(keys.mouse, Some(MouseMode::Zones));
+        // what the game names its buttons (seen on the players page)
+        let own = |slot: u8, target: &str| Zone::is_own(&keys.zones, slot, 0, 0, Some(target));
+        assert!(own(1, "_root.players.p2.b10") && own(1, "_root.players.p2.instance613"), "P2's arrows, Edit Player");
+        assert!(!own(1, "_root.players.p2.combo.instance614"), "not the Keyboard 2 drop-down");
+        assert!(!own(1, "_root.players.p1.b9") && !own(1, "_root.nextbutton") && !own(1, "_root.instance108"));
+        assert!(!Zone::allows(&keys.zones, 0, 0, 0, Some("_root.players.p2.b10")), "the host stays off the P2 card");
+        assert!(Zone::allows(&keys.zones, 0, 0, 0, Some("_root.instance108")), "the title screen is the host's");
     }
 
     #[test]

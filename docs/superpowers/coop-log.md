@@ -316,6 +316,67 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (Space). A built-in map and the same `.keys` file get the same id (name + text hash), so both can meet.
   Tests 149/149, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d; ChaosFaction2_coop.swf match2.txt 3000
   frames: built-in and file both 1748d03d. Not released yet (next release).
+- Friends' clicks (user: "1 + 2 + 5 (but whenever the game allows the click) and maybe 9"): key map `mouse: host|buttons|all`
+  and `zone N: X,Y WxH`, API `coop.mouse`, `coop.zone`, `coop.clicked`; friends' cursors drawn while friends may
+  click. "buttons" = Ruffle's hand-cursor test at the friend's point. Test SWF desktop/tests/coop/clicks; demo:
+  Bob clicks Red, Ann Blue, Ann refused on Bob's switch (his zone), Bob's switch ON, Bob refused on empty floor,
+  Green: both windows' logs identical (frames 147-302). Replay twice 3fa99a8d, relay room Q6DSQ 1500 frames
+  desync_at=none. Tests 153/153, replays BIC/GM2/TW unchanged. Found: a game's coop.keys reset the click rules;
+  now a map changes them only if it has `mouse:`/`zone` lines.
+- Chaos Faction 2 character screen (user: "do on chaos faction 2", "Yes, add them"): built-in map gets `mouse: buttons`
+  and zones (P1 card host, P2 card below its header Bob, the P2 drop-down host). Replay (match2 + picks): Ann flips
+  hers, Bob flips his, each refused on the other's card, Bob refused on the drop-down, Bob may pick for P3 (open);
+  into the fight, replays identical (ed74c5a5), relay room FPLU4 3600 frames desync_at=none, two windows same.
+  The mod's own mod/chaos-faction-2.keys (used by the launcher until the next release) needs the same lines.
+- User tried it: "the other player can click anything. i wanted this to work only on their character selection."
+  New `mouse: zones`: a friend's clicks count only in their own zone (on clickable things); the host everywhere but
+  others' zones. Chaos Faction 2's map: `mouse: zones`, `zone 1: 302,190 194x163` (P2 card below the drop-down).
+  Replay: Bob's own card changes, his P3 click is refused now.
+- User: "weird bugs with the mouse ... the host can't click". Cause: one click at a time, and a friend's click could
+  stay "held" forever (release outside their window, or a right click whose release Ruffle's menu swallows, since
+  every button counted as a press), so the host's clicks were dropped. Fix: the host's click always goes through
+  (a held friend's click is let go first), only the left button presses, a window losing focus lets go of its
+  button. Test: a friend stuck down doesn't block the host. 153/153, replays unchanged.
+- User: the host couldn't click Start!/Settings/Level Editor (Credits worked). Cause: key-map zones were fixed boxes on
+  every screen; Bob's character-card box covered the title menu (and let Bob click it). Fix: a zone can name a clip
+  (`zone 1: _root.players.p2`): it covers only buttons inside that clip, only while it is on show; the most exact
+  clip wins (`zone 0: _root.players.p2.combo` keeps the drop-down the host's). Paths found by asking Ruffle what
+  each click lands on (now logged while friends may click). CF2 replay: Bob's Settings click on the title refused,
+  Ann's Start! works, Bob's card only; replays identical (7fa064fb), relay room 2G9E9 3600 frames desync_at=none.
+  153/153, BIC/GM2/TW unchanged.
+- Checkpoint (user: "remember the ruffle build we have rn in case it becomes too broken"): commit d0ac840 built clean
+  into `ruffle-checkpoints/2026-10-30-d0ac840/` (exe, its Chaos Faction 2 map, README); git branch
+  `checkpoint/friends-clicks-2026-10-30`. Taken before the private-screens work.
+- Private screens (user: "i want only the player that clicked on it to see it"): key map `private: <clip>` / API
+  `coop.only(path)`, `coop.only(slot, path)`, `coop.shared(path)`. The clip belongs to whoever's click opened it:
+  only their PC draws it (new picture-only flag, like the HUD), only they click it (it is their zone), everyone else's
+  mouse goes through it (it steps out of picking for their mouse events) and their cursor isn't drawn over it.
+  User found: with one editor in the game, a second player opening theirs took it over; and the host's hover showed
+  for everyone. Fixes: `opened-by <pattern>` (and `coop.only(path, pattern)`): while it is someone's, nobody else's
+  click on its openers counts, and they see "Bob has that open: wait until they close it"; `hover: off` (the
+  default while friends may click) rests the game's mouse off the stage between clicks, `hover: host` / `coop.hover`.
+  Chaos Faction 2: `private: _root.pcb opened-by _root.players.*.instance*` (the editor is _root.pcb, Edit Player
+  buttons are _root.players.pN.instanceK, found from the click log). Windows: Bob's editor only on Bob's screen, Ann's
+  Edit Player refused with the notice, after Bob's Cancel Ann's opens only on hers, Bob's refused. Replays identical
+  (5b2d0408), relay room GHRMG 2800 frames desync_at=none. Tests 154/154, replays BIC/GM2/TW unchanged.
+- Hover (user: "hovering doesnt work now at all", then "this is not even the original game's highlight ... you
+  just made smth custom"): parking the game's mouse off the stage killed all hover and also mouse-move effects
+  (Chaos Faction 2's help bubble stayed up, covering Bob's arrows); the white outline I drew was custom. Chaos
+  Faction 2's highlights (the yellow arrows, the glow) are made by its code, so they can only follow one mouse. User
+  chose the game's real hover: `hover: host` is the default again and in Chaos Faction 2's map; the outline is gone.
+  Kept as options: `hover: own` (per PC, only Button symbols' own Up/Over art, built from their records without
+  running code; nothing custom) and `hover: off`. Tests 154/154, replays BIC/GM2/TW unchanged, Chaos Faction 2
+  replays identical (18b022a3), relay room F72NH 2800 frames desync_at=none.
+- Click queue and 4 players (user: "queueing it is"): Flash has one mouse button; friends' clicks that land together
+  used to be dropped. Now they queue (one a frame, oldest first, then by slot; a queued player who already let go
+  gets a press and a release); the host's click still goes at once; a friend holding the button over 30 frames while
+  others wait is let go. Scripts gained `press X Y SLOT` / `release SLOT` (no frame passes). Test
+  four_players_take_turns_on_the_one_mouse: 3 friends in one frame all arrive in slot order, player 3's box keeps out
+  player 4, a long hold gives way, player 3's private pop-up with 4 players. API demo demo-4p.txt: replay twice
+  identical (4c06b3f1), 4 headless players on the relay room HNNSJ desync_at=none for all 4, 4 real windows (room
+  846PM): every window logged Red f270, Blue f271, Green f272, player 4 refused on Bob's switch, Bob's switch ON.
+  156/156, replays BIC/GM2/TW unchanged, Chaos Faction 2 replay unchanged (18b022a3). Seen: a name tag of a dot out
+  of view is drawn outside the game area in a small window (picture only).
 - coop.hud inside a moved parent (Intrusion 1 session's report): a HUD clip undid the camera inside its parent's
   transform, so in a game that scrolls by moving `_root` (Intrusion: _root._x ~6000, _root.ui at minus that) the
   HUD landed (zoom-1) * root offset away, off screen. Now `coop_view::hud_matrix` = P^-1 * camera^-1 * P * own

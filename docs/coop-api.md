@@ -46,7 +46,7 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.isHost` | **local** | `true` on the host's PC |
 | `coop.ping(slot)` | **local** | This PC's round trip to that player in ms (0 to itself; `undefined` until measured, about 2 s). Friend to friend goes through the host, so it's both trips added |
 | `coop.version` | shared | API version: 2 |
-| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat` |
+| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat`, `clicks`, `zones`, `private`, `hover` |
 
 ### Input
 
@@ -56,11 +56,55 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.button(slot, name)` | shared | `true` while that player holds the button (`"FIRE"`, `"KEY1"`...); `undefined` for an unknown name |
 | `coop.mouseX(slot)`, `coop.mouseY(slot)` | shared | That player's mouse in stage pixels (each PC's cursor goes through its own camera, so these are game coordinates). (0, 0) until it moves |
 | `coop.mouseDown(slot)` | shared | `true` while that player's left button is down |
+| `coop.clicked(slot)` | shared | `true` on the frame that player pressed their left button (whether or not the click reached the game) |
 | `coop.typed(slot)` | shared | What that player typed this frame, `"\b"` for Backspace and `"\n"` for Enter. Calling it tells Ruffle the game wants every typed character for the next 60 frames (see "Typing" below) |
 | `coop.keys(text)` | shared | The game's own key map, in the `.keys` format (`"slot 0: UP=38 FIRE=32\n..."`), used from the next frame on every PC; held keys are let go first; the same map again changes nothing. `true` if it parsed |
 
 `coop.buttons` is the easy way to add players to a single-player game: read each slot's buttons and move
 each character, instead of faking keyboard keys.
+
+### Who may click
+
+Flash has one mouse. By default only the host's clicks reach the game (every PC still knows every player's
+mouse through `coop.mouseX` and friends). A game can let friends click too:
+
+| Call | Kind | Effect |
+|---|---|---|
+| `coop.hover(mode)` | shared | Hover while friends may click. `"host"` (the default): the game's own hover follows the host's mouse, on every screen, exactly as the game does it (hover made by the game's code can only ever be one for everyone). `"own"`: the same, plus each PC draws Button symbols in the game's own Up/Over art by its own player's mouse (only where a Button symbol has its own Over art; nothing custom is drawn). `"off"`: the game's mouse rests off the stage between clicks, so there is no hover at all (mouse-move effects stop too). Each player's own cursor shows on their own screen either way |
+| `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"zones"`: a friend's clicks count only inside their own zone (below) and on something clickable there, like their own card on a character screen; the host clicks everything else. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
+| `coop.zone(slot, path)` | shared | The buttons inside the clip at `path` (`"_root.players.p2"`) belong to that player: their own card on a character screen. Nobody else's click on them counts, the host's included. It only applies while that clip is on show, so other screens are untouched. When zones nest, the most exact clip wins (`zone 0: _root.players.p2.combo` gives a card's drop-down back to the host) |
+| `coop.zone(slot, x, y, w, h)` | shared | The same for a box (stage pixels). A box applies on every screen, so prefer a clip. `coop.zone(slot)` clears that player's zones |
+
+A key map can set both without changing the SWF: `mouse: zones` and `zone 1: _root.players.p2` (player 2's
+card). Chaos Faction 2's built-in map does this for its character screen. A friend's click moves the game's
+mouse to their point for the click and back to the host's after, so hover effects can flicker while friends
+click. Flash has one mouse button, so clicks take turns: the host's always goes at once (a friend's held click is
+let go first); friends' clicks that land together wait in a queue and follow one a frame, oldest first, then by
+slot (tested with 4 players: three friends clicking in the same frame all reach the game); a friend holding the
+button over a second while others wait is let go.
+To find a button's path for a zone, turn friends' clicks on (`mouse: buttons`) and click it once: the log
+(`%LOCALAPPDATA%\ruffle\log\ruffle.log`) says e.g. `player 2 clicks _root.players.p2.b10 (463, 272)`. For hover
+or drags of its own (a slider every player can move), a game sets `coop.mouse("host")` on that screen and
+uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
+
+### Private screens
+
+A pop-up that only one player sees and uses: a player editor, a shop, an inventory. Every PC runs the same
+game, so the pop-up is open in everyone's game; what changes is the picture and the mouse, the same way on every
+PC (no desync).
+
+| Call | Kind | Effect |
+|---|---|---|
+| `coop.only(path)` | shared | The clip at `path` (`"_root.pcb"`) belongs to whoever's click opened it, while it is on show: only their PC draws it, only they click it, and everyone else's mouse goes through it to what is underneath (their cursor isn't shown over it either) |
+| `coop.only(path, pattern)` | shared | The same, and while it is someone's nobody else may click the buttons that open it (`"_root.players.*.instance*"`: `*` is any one name, `instance*` any name starting so). For a game that has one of the pop-up for everyone (one Player Editor): a second player opening theirs would take over the first one's. A refused player sees "Bob has that open: wait until they close it" |
+| `coop.only(slot, path)` | shared | The same, always that player's |
+| `coop.shared(path)` | shared | Everyone sees and clicks it again |
+
+A key map does the same without changing the SWF: `private: _root.pcb opened-by _root.players.*.instance*`
+(Chaos Faction 2's Player Editor and its Edit Player buttons), and `hover: host`, `hover: own` or `hover: off`. It
+works with friends' clicks (`mouse: zones` or `buttons`): the player who opened the pop-up clicks it even
+outside their zone. Limits: the pop-up is still open in everyone's game, so a game that freezes the screen behind
+its pop-ups freezes it for everyone; `BitmapData.draw` of the stage still sees it on every PC.
 
 ### Host settings
 
@@ -97,6 +141,8 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 | **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 13 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected, typed text only reaches `coop.typed`; instead each player's key press types its game key's character (from any key map, `coop.keys` included, and in scripts and replays), so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
+| **Private screens** | With `private: <clip>` in the key map, a pop-up only the player who opened it sees and clicks |
+| **Friends' cursors** | Off by default. While friends may click (`mouse: zones`, `buttons` or `all`), a player's mouse shows in the other windows (an arrow in their colour with their name, picture only) only while it is over something that player may click, e.g. their own card on a character screen |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |
 | **Save** | Everyone starts from the host's co-op save (`--coop-save coop\|solo\|new`), and every PC keeps the session's saves in its own co-op save, so anyone can host next time |
@@ -139,4 +185,6 @@ wait 25           25 frames with what is held now
 click 275 300 1   player 1's mouse: one frame pressed at stage pixel (275, 300)
 move 100 50       the host's mouse moves
 type 1 Sam{Enter} player 1 types "Sam" then Enter (8 characters a frame; {Backspace} too)
+press 100 50 2    player 2's mouse moves there and holds its button, no frame passes (so several
+release 2          players can press in the same frame); release lets go, no frame passes
 ```
