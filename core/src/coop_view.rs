@@ -47,6 +47,14 @@ pub fn camera_matrix(width: f64, height: f64, x: f64, y: f64, zoom: f64) -> Matr
         * Matrix::translate(to_twips(-x), to_twips(-y))
 }
 
+/// The matrix a HUD clip is drawn with. Everything is drawn at `view * camera * parent * matrix`
+/// (`parent`: the clip's parent in stage coordinates); a HUD clip must land where it would with no
+/// camera, `view * parent * own`, also when the game moves its parents (Intrusion scrolls by
+/// moving `_root`). None when the camera or the parent can't be undone.
+pub fn hud_matrix(camera: Matrix, parent: Matrix, own: Matrix) -> Option<Matrix> {
+    Some(parent.inverse()? * camera.inverse()? * parent * own)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +68,25 @@ mod tests {
         assert_eq!(at(1010.0, 200.0), Point::new(Twips::from_pixels(420.0), Twips::from_pixels(300.0)));
         let still = camera_matrix(800.0, 600.0, 400.0, 300.0, 1.0);
         assert_eq!(still, Matrix::IDENTITY, "centred at the middle, zoom 1: no change");
+    }
+
+    /// Intrusion moves `_root` to scroll (about 6000 px) and keeps `_root.ui` at minus that: with a
+    /// zoomed camera the HUD still lands where it would with no camera at all.
+    #[test]
+    fn a_hud_inside_a_moved_parent_lands_where_it_would_without_a_camera() {
+        let px = |pixels: f64| Twips::from_pixels(pixels);
+        let camera = camera_matrix(720.0, 540.0, 360.0, 270.0, 1.5);
+        let root = Matrix::translate(px(6000.0), px(-40.0));
+        let ui = Matrix::translate(px(-6000.0), px(40.0)) * Matrix::translate(px(12.0), px(8.0));
+        let drawn = camera * root * hud_matrix(camera, root, ui).expect("invertible");
+        let corner = Point::new(Twips::ZERO, Twips::ZERO);
+        assert_eq!(drawn * corner, root * ui * corner);
+        assert_eq!(drawn * corner, Point::new(px(12.0), px(8.0)), "the HUD's own spot on the stage");
+        // the old undo, inside the parent, put it zoom-1 times the root's offset away
+        let old = camera * root * camera.inverse().expect("invertible") * ui;
+        assert_ne!(old * corner, root * ui * corner);
+        // a parent at the stage's origin: the same as undoing the camera alone
+        let at_origin = hud_matrix(camera, Matrix::IDENTITY, ui).expect("invertible");
+        assert_eq!(at_origin, camera.inverse().expect("invertible") * ui);
     }
 }

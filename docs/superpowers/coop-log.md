@@ -316,3 +316,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (Space). A built-in map and the same `.keys` file get the same id (name + text hash), so both can meet.
   Tests 149/149, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d; ChaosFaction2_coop.swf match2.txt 3000
   frames: built-in and file both 1748d03d. Not released yet (next release).
+- coop.hud inside a moved parent (Intrusion 1 session's report): a HUD clip undid the camera inside its parent's
+  transform, so in a game that scrolls by moving `_root` (Intrusion: _root._x ~6000, _root.ui at minus that) the
+  HUD landed (zoom-1) * root offset away, off screen. Now `coop_view::hud_matrix` = P^-1 * camera^-1 * P * own
+  (P: the parent in stage coordinates), so the HUD lands where it would with no camera. Culling needs no change:
+  the HUD's stage bounds are inside view_bounds' stage half. Intrusion_coop.swf rebuilt with N.CAMS = true (a
+  scratch copy), four.txt 1150 frames: 1.0.3.8 shows no HUD, the fix shows it where the cameras-off build does;
+  fingerprints identical (picture only). Tests 149/149 + core coop_view; replays BIC/GM2/TW unchanged. Not released.
