@@ -302,3 +302,9 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   character again, from any map, while no text box is selected; while one is, only what players typed goes in
   (no double letters). Untouched DadNMe.swf, A presses only: 1.0.3.7 stays on PLAY, the fix reaches the park.
   Tests 148/148, replays BIC fa623659 / GM2 8e30f66c / TW identical to the 1.0.3.7 exe.
+- Release v1.0.3.8 (user: "Test in windows first", then release): commit 908e2cd = eca5b3a (keyPress from any key
+  map) + version. Windows: DadNMe_coop.swf host + friend, A presses only: both windows in the park, same
+  fingerprints (1.0.3.7: still on PLAY). API demo: replay twice = 1.0.3.7 (ec7d97f6), headless pair on the relay
+  room UB63M desync_at=none, two windows on the relay room UUMBX 5274 frames same fingerprint. Tests 148/148,
+  replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay room NAZD9 in sync, zip SHA-256
+  630847fe...8a59, latest, re-downloaded hash matches. mods-info 8f47aff.
