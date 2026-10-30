@@ -3,6 +3,7 @@ package {
     import flash.display.Sprite;
     import flash.events.Event;
     import flash.events.KeyboardEvent;
+    import flash.events.MouseEvent;
     import flash.text.TextField;
     import flash.text.TextFormat;
 
@@ -15,6 +16,8 @@ package {
      *   UP DOWN LEFT RIGHT  move your dot        FIRE  ring around your dot
      *   KEY1  switch the game's key map (menu: FIRE = Enter, play: FIRE = Space)
      *   KEY3  your camera off / on
+     *   Red / Blue / Green buttons: anyone clicks them (coop.mouse "buttons"); Bob's switch only
+     *   player 2 (coop.zone)
      *   typing goes to your line of the name board; Enter makes it your dot's label
      *
      * Gameplay reads only shared answers. localSlot, isHost and ping only reach the HUD's text.
@@ -50,6 +53,10 @@ package {
         private var menuKeys:Boolean = false;
         private var keyEvents:Array = [];
         private var events:Array = [];
+        private var signText:TextField;
+        private var signClicks:int = 0;
+        private var switchOn:Boolean = false;
+        private var clicks:Array = [];
 
         public function CoopDemo() {
             n = RuffleTogether.players();
@@ -59,6 +66,7 @@ package {
             world.name = "world";
             addChild(world);
             drawWorld();
+            addButtons();
             for (var s:int = 0; s < n; s++) {
                 var dot:Sprite = new Sprite();
                 dot.name = "p" + s;
@@ -91,6 +99,7 @@ package {
                 given.push("");
                 held.push(0);
                 cameraOn.push(true);
+                clicks.push("-");
             }
 
             hud.name = "hud";
@@ -107,6 +116,66 @@ package {
             RuffleTogether.keys(PLAY_KEYS);
             stage.addEventListener(KeyboardEvent.KEY_DOWN, onKey);
             addEventListener(Event.ENTER_FRAME, tick);
+        }
+
+        /** Buttons in the world: anyone may click the colours, only player 2 Bob's switch. */
+        private function addButtons():void {
+            var sign:Sprite = new Sprite();
+            sign.x = 220;
+            sign.y = 322;
+            sign.graphics.beginFill(0xFFFFFF);
+            sign.graphics.lineStyle(2, 0x404040);
+            sign.graphics.drawRect(0, 0, 530, 44);
+            world.addChild(sign);
+            signText = new TextField();
+            signText.x = 8;
+            signText.y = 8;
+            signText.width = 514;
+            signText.height = 30;
+            signText.selectable = false;
+            signText.defaultTextFormat = new TextFormat("_sans", 16, 0x202020, true);
+            sign.addChild(signText);
+            setSign("NONE", 0);
+            button("Red", 220, 0xE04040, function ():void { setSign("RED", 1); });
+            button("Blue", 360, 0x3070F0, function ():void { setSign("BLUE", 1); });
+            button("Green", 500, 0x30B050, function ():void { setSign("GREEN", 1); });
+            button("Bob's switch", 640, 0x707070, function ():void {
+                switchOn = !switchOn;
+                setSign(null, 0);
+            });
+            RuffleTogether.mouse("buttons");
+            RuffleTogether.zone(1, 636, 376, 118, 58);
+        }
+
+        private var signColour:String = "NONE";
+
+        private function setSign(colour:String, count:int):void {
+            if (colour != null) signColour = colour;
+            signClicks += count;
+            signText.text = "SIGN: " + signColour + " (" + signClicks + " clicks)   Bob's switch: " + (switchOn ? "ON" : "off");
+            trace("frame " + frame + " " + signText.text);
+        }
+
+        private function button(label:String, x:Number, colour:uint, onClick:Function):void {
+            var b:Sprite = new Sprite();
+            b.x = x;
+            b.y = 380;
+            b.graphics.lineStyle(2, 0x000000);
+            b.graphics.beginFill(colour);
+            b.graphics.drawRect(0, 0, 110, 50);
+            b.graphics.endFill();
+            b.buttonMode = true;
+            b.mouseChildren = false;
+            var t:TextField = new TextField();
+            t.width = 110;
+            t.height = 50;
+            t.y = 14;
+            t.selectable = false;
+            t.defaultTextFormat = new TextFormat("_sans", 14, 0xFFFFFF, true, null, null, null, null, "center");
+            t.text = label;
+            b.addChild(t);
+            b.addEventListener(MouseEvent.CLICK, function (e:MouseEvent):void { onClick(); });
+            world.addChild(b);
         }
 
         private function text(x:Number, y:Number, w:Number, h:Number, size:int):TextField {
@@ -194,6 +263,9 @@ package {
                     cameraOn[s] = !cameraOn[s];
                 }
                 held[s] = bits;
+                if (RuffleTogether.clicked(s)) {
+                    clicks[s] = "f" + frame + " at " + Math.round(RuffleTogether.mouseX(s)) + "," + Math.round(RuffleTogether.mouseY(s));
+                }
 
                 cursors[s].x = RuffleTogether.mouseX(s);
                 cursors[s].y = RuffleTogether.mouseY(s);
@@ -255,7 +327,8 @@ package {
                 + "has: " + has.join(" ") + "\n"
                 + "options: " + (opts.length ? opts.join("  ") : "(none)") + "   (speed " + speed + ", zoom " + zoom + ")\n"
                 + who.join("\n") + "\n"
-                + "key map: " + (menuKeys ? "MENU (FIRE=Enter)" : "PLAY (FIRE=Space)") + "   game got keys: " + keyEvents.join(", ");
+                + "key map: " + (menuKeys ? "MENU (FIRE=Enter)" : "PLAY (FIRE=Space)") + "   game got keys: " + keyEvents.join(", ")
+                + "\nclicks (mouse: buttons; Bob's box 636,376 118x58): P1 " + clicks[0] + (n > 1 ? "   P2 " + clicks[1] : "");
             var text2:String = "NAME BOARD (coop.typed; Enter = label)\n";
             for (var t:int = 0; t < n; t++) {
                 text2 += "P" + (t + 1) + ": " + lines[t] + "_" + (given[t] ? "   label: " + given[t] : "") + "\n";

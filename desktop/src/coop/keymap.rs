@@ -9,6 +9,9 @@
 //! slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
 //! slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
 //! local: UP=38,87 DOWN=40,83 FIRE=90,84     keys a player presses on their own PC, per button
+//! mouse: buttons                            who may click: host (the default), buttons (friends
+//!                                           too, on what the game made clickable), all
+//! zone 1: 290,95 200x190                    only player 2 may click in this box (stage pixels)
 //! ```
 
 use crate::coop::lockstep::{MAX_PLAYERS, button_named};
@@ -45,6 +48,56 @@ pub struct Game {
     slots: Vec<Vec<(u16, u32)>>,
     /// (key code a player presses, button).
     local: Vec<(u32, u16)>,
+    /// The map's `mouse:` line, if it has one.
+    mouse: Option<MouseMode>,
+    zones: Vec<Zone>,
+}
+
+/// Who may click the game (`mouse:` in a key map, or the game's `coop.mouse`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MouseMode {
+    /// Only the host's mouse reaches the game (every PC still knows every player's mouse).
+    #[default]
+    Host,
+    /// Every player's clicks, but a friend's only on something the game made clickable (what
+    /// shows the hand cursor).
+    Buttons,
+    /// Every player's clicks, anywhere.
+    All,
+}
+
+impl MouseMode {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "host" => Some(Self::Host),
+            "buttons" => Some(Self::Buttons),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+/// A box on the stage (pixels) that only one player may click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Zone {
+    pub slot: u8,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Zone {
+    /// Whether the stage point (x, y), in twips, is in the box.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let (x, y) = (x as f64 / 20.0, y as f64 / 20.0);
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+
+    /// May `slot` click at (x, y) (twips)? Not in a box that belongs to someone else.
+    pub fn allows(zones: &[Zone], slot: u8, x: i32, y: i32) -> bool {
+        !zones.iter().any(|zone| zone.slot != slot && zone.contains(x, y)) || zones.iter().any(|zone| zone.slot == slot && zone.contains(x, y))
+    }
 }
 
 impl Game {
@@ -77,6 +130,8 @@ impl Game {
             shared: false,
             slots: vec![],
             local: vec![],
+            mouse: None,
+            zones: vec![],
         };
         for (number, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
@@ -103,6 +158,19 @@ impl Game {
                 continue;
             } else if line == "shared" {
                 game.shared = true;
+            } else if let Some(mode) = line.strip_prefix("mouse:") {
+                game.mouse = MouseMode::named(mode.trim()).map(Some).ok_or_else(|| fail(format!("mouse is host, buttons or all: {mode}")))?;
+            } else if let Some(rest) = line.strip_prefix("zone ") {
+                let zone = (|| {
+                    let (slot, rest) = rest.split_once(':')?;
+                    let (at, size) = rest.trim().split_once(' ')?;
+                    let (x, y) = at.split_once(',')?;
+                    let (width, height) = size.trim().split_once('x')?;
+                    let slot = slot.trim().parse::<u8>().ok().filter(|&s| (s as usize) < MAX_PLAYERS)?;
+                    Some(Zone { slot, x: x.parse().ok()?, y: y.parse().ok()?, width: width.parse().ok()?, height: height.parse().ok()? })
+                })()
+                .ok_or_else(|| fail("expected zone N: X,Y WxH".into()))?;
+                game.zones.push(zone);
             } else if let Some(list) = line.strip_prefix("local:") {
                 for (button, codes) in pairs(list)? {
                     game.local.extend(codes.into_iter().map(|code| (code, button)));
@@ -159,6 +227,8 @@ impl Game {
             held: vec![0; slots.len()],
             slots,
             shared: self.shared,
+            mouse: self.mouse,
+            zones: self.zones.clone(),
         }
     }
 
@@ -249,6 +319,10 @@ pub struct GameKeys {
     held: Vec<u16>,
     /// Every slot presses the same keys (a hot-seat game): a key is down while any player holds it.
     shared: bool,
+    /// Who may click, and the boxes only one player may click (the map's `mouse:` and `zone`;
+    /// None and no boxes when it says nothing, so a game's own `coop.keys` map keeps the rules).
+    pub mouse: Option<MouseMode>,
+    pub zones: Vec<Zone>,
 }
 
 impl GameKeys {
@@ -293,6 +367,27 @@ impl GameKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `mouse:` and `zone` lines: who may click, and boxes only one player may click.
+    #[test]
+    fn mouse_rules_and_zones() {
+        let game = Game::parse("t", "slot 0: FIRE=32
+mouse: buttons
+zone 1: 290,95 200x190").expect("map");
+        let keys = game.keys();
+        assert_eq!(keys.mouse, Some(MouseMode::Buttons));
+        let zone = Zone { slot: 1, x: 290.0, y: 95.0, width: 200.0, height: 190.0 };
+        assert_eq!(keys.zones, [zone]);
+        let px = |p: i32| p * 20;
+        assert!(Zone::allows(&keys.zones, 1, px(300), px(100)), "its owner");
+        assert!(!Zone::allows(&keys.zones, 0, px(300), px(100)), "anyone else");
+        assert!(Zone::allows(&keys.zones, 0, px(10), px(10)), "outside every box");
+        assert_eq!(Game::parse("t", "slot 0: FIRE=32").expect("map").keys().mouse, None);
+        assert!(Game::parse("t", "slot 0: FIRE=32
+mouse: some").is_err());
+        assert!(Game::parse("t", "slot 0: FIRE=32
+zone 9: 1,2 3x4").is_err());
+    }
     use crate::coop::lockstep::{ALT, DOWN, FIRE, KEY1, KEY2, KEY3, KEY4, LEFT, MENU, NO, QUIT, RIGHT, UP, VIEW, YES, button_named};
 
     fn game(name: &str) -> Game {

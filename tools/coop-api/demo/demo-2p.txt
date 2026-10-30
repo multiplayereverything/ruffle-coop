@@ -7,6 +7,23 @@ wait 20
 type 0 {Backspace}a{Enter}
 type 1 by{Enter}
 wait 40
+# friends' clicks (the game says coop.mouse "buttons"; Bob's switch is player 2's box): Bob clicks Red,
+# Ann clicks Blue, Ann tries Bob's switch (refused: his box), Bob clicks it, Bob clicks empty floor
+# (refused: nothing clickable there), Bob clicks Green
+move 300 300 1
+wait 20
+click 275 405 1
+wait 30
+click 415 405 0
+wait 30
+click 695 405 0
+wait 30
+click 695 405 1
+wait 30
+click 300 250 1
+wait 30
+click 555 405 1
+wait 40
 # coop.buttons / camera: the dots leave the stage area, each camera follows its own dot
 p0 RIGHT|DOWN
 p1 LEFT|DOWN

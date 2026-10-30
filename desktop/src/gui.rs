@@ -105,11 +105,12 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let (labels, notice, chat) = crate::coop::session()
-                .map(|session| (session.labels(), session.notice(), session.chat_view()))
+            let (labels, notice, chat, cursors) = crate::coop::session()
+                .map(|session| (session.labels(), session.notice(), session.chat_view(), session.friend_cursors()))
                 .unwrap_or_default();
             show_chat(egui_ctx, &chat.0, chat.1.as_deref());
             show_labels(egui_ctx, player, &labels, menu_height_offset);
+            show_cursors(egui_ctx, player, &cursors, menu_height_offset);
             if let Some(notice) = notice {
                 Area::new(Id::new("coop-notice"))
                     .anchor(Align2::CENTER_TOP, vec2(0.0, 40.0))
@@ -222,6 +223,34 @@ fn show_labels(
         let font = FontId::proportional(14.0);
         painter.text(at + vec2(1.0, 1.0), Align2::CENTER_BOTTOM, &label.text, font.clone(), Color32::BLACK);
         painter.text(at, Align2::CENTER_BOTTOM, &label.text, font, Color32::WHITE);
+    }
+}
+
+/// Ruffle Together: the other players' mice, an arrow in their colour with their name (only
+/// while friends may click the game; the picture only).
+fn show_cursors(egui_ctx: &egui::Context, player: &mut Player, cursors: &[(String, u8, i32, i32, bool)], menu_height_offset: f64) {
+    const COLOURS: [Color32; 4] = [
+        Color32::from_rgb(224, 64, 64),
+        Color32::from_rgb(48, 112, 240),
+        Color32::from_rgb(48, 176, 80),
+        Color32::from_rgb(224, 160, 32),
+    ];
+    if cursors.is_empty() {
+        return;
+    }
+    let painter = egui_ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("coop-cursors")));
+    let points = egui_ctx.pixels_per_point() as f64;
+    for (name, slot, x, y, down) in cursors {
+        let (x, y) = player.coop_window_position(*x, *y);
+        let at = pos2((x / points) as f32, ((y + menu_height_offset) / points) as f32);
+        let colour = COLOURS[*slot as usize % COLOURS.len()];
+        let size = if *down { 1.3 } else { 1.0 };
+        let arrow = vec![at, at + vec2(0.0, 16.0) * size, at + vec2(4.5, 12.0) * size, at + vec2(11.0, 11.0) * size];
+        painter.add(egui::Shape::convex_polygon(arrow, colour, egui::Stroke::new(1.5, Color32::BLACK)));
+        let font = FontId::proportional(12.0);
+        let text_at = at + vec2(12.0, 14.0);
+        painter.text(text_at + vec2(1.0, 1.0), Align2::LEFT_TOP, name, font.clone(), Color32::BLACK);
+        painter.text(text_at, Align2::LEFT_TOP, name, font, colour);
     }
 }
 

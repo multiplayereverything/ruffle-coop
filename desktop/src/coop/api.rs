@@ -6,6 +6,10 @@
 //! ExternalInterface.call("coop.mouseX", slot)    that slot's mouse, stage pixels (same space as _root._xmouse)
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
+//! ExternalInterface.call("coop.clicked", slot)   true on the frame that slot pressed its left button
+//! ExternalInterface.call("coop.mouse", mode)     who may click the game: "host", "buttons" (friends on
+//!                                                clickable things too) or "all"
+//! ExternalInterface.call("coop.zone", slot, x, y, w, h)  only that slot may click in the box; (slot) clears its boxes
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
@@ -35,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat"];
+pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat", "clicks", "zones"];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;
@@ -64,6 +68,12 @@ pub struct CoopApi {
     pub local_slot: u8,
     /// Each slot's mouse (stage twips) and left button, as of the frame that runs now.
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
+    /// Each slot pressed its left button this frame (`coop.clicked`).
+    pub clicked: [bool; MAX_PLAYERS],
+    /// Who may click the game, and the boxes only one player may click: the key map's at first,
+    /// then whatever the game says (`coop.mouse`, `coop.zone`).
+    pub mouse_mode: crate::coop::keymap::MouseMode,
+    pub zones: Vec<crate::coop::keymap::Zone>,
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
     /// What happened that the game hasn't read yet (`coop.events`), oldest first.
@@ -95,6 +105,9 @@ impl CoopApi {
             players,
             local_slot,
             mouse: [(0, 0, false); MAX_PLAYERS],
+            clicked: [false; MAX_PLAYERS],
+            mouse_mode: Default::default(),
+            zones: vec![],
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
             options: vec![],
@@ -118,9 +131,11 @@ impl CoopApi {
         for (slot, input) in inputs.iter().enumerate().take(MAX_PLAYERS) {
             self.buttons[slot] = input.buttons;
             self.typed[slot] = input.text;
+            let was_down = self.mouse[slot].2;
             if let Some(mouse) = input.mouse {
                 self.mouse[slot] = mouse;
             }
+            self.clicked[slot] = self.mouse[slot].2 && !was_down;
         }
     }
 
@@ -159,6 +174,25 @@ impl CoopApi {
             ("coop.mouseX", Some(slot)) => Value::Number(self.mouse[slot].0 as f64 / 20.0),
             ("coop.mouseY", Some(slot)) => Value::Number(self.mouse[slot].1 as f64 / 20.0),
             ("coop.mouseDown", Some(slot)) => Value::Bool(self.mouse[slot].2),
+            ("coop.clicked", Some(slot)) => Value::Bool(self.clicked[slot]),
+            ("coop.mouse", _) => match text(0).and_then(|mode| crate::coop::keymap::MouseMode::named(&mode)) {
+                Some(mode) => {
+                    self.mouse_mode = mode;
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.zone", Some(slot)) => match (number(1), number(2), number(3), number(4)) {
+                (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
+                    self.zones.push(crate::coop::keymap::Zone { slot: slot as u8, x, y, width, height });
+                    Value::Bool(true)
+                }
+                (None, None, None, None) if args.len() == 1 => {
+                    self.zones.retain(|zone| zone.slot as usize != slot);
+                    Value::Bool(true)
+                }
+                _ => Value::Bool(false),
+            },
             ("coop.typed", Some(slot)) => {
                 self.typed_read_at = Some(self.frame);
                 let text: String = self.typed[slot]
@@ -269,6 +303,27 @@ impl ExternalInterfaceProvider for CoopApiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `coop.clicked` is true on the press frame only; `coop.mouse` and `coop.zone` change the
+    /// click rules, `coop.zone(slot)` clears that slot's boxes.
+    #[test]
+    fn clicks_and_click_rules() {
+        use crate::coop::keymap::MouseMode;
+        let mut api = CoopApi::new(2, 0);
+        let mouse = |down| InputFrame { mouse: Some((100, 100, down)), ..Default::default() };
+        api.update(&[InputFrame::default(), mouse(true)]);
+        assert_eq!(api.answer("coop.clicked", &[Value::Number(1.0)]), Value::Bool(true));
+        api.update(&[InputFrame::default(), mouse(true)]);
+        assert_eq!(api.answer("coop.clicked", &[Value::Number(1.0)]), Value::Bool(false), "held, not a new click");
+        assert_eq!(api.answer("coop.mouse", &[Value::String("buttons".into())]), Value::Bool(true));
+        assert_eq!(api.mouse_mode, MouseMode::Buttons);
+        assert_eq!(api.answer("coop.mouse", &[Value::String("nobody".into())]), Value::Bool(false));
+        let zone = [1.0, 10.0, 20.0, 30.0, 40.0].map(Value::Number);
+        assert_eq!(api.answer("coop.zone", &zone), Value::Bool(true));
+        assert_eq!(api.zones.len(), 1);
+        assert_eq!(api.answer("coop.zone", &[Value::Number(1.0)]), Value::Bool(true));
+        assert!(api.zones.is_empty());
+    }
 
     fn n(v: f64) -> Value {
         Value::Number(v)

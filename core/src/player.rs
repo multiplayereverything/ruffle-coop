@@ -1030,6 +1030,28 @@ impl Player {
         })
     }
 
+    /// Ruffle Together: where the stage point (x, y) (twips) is in the window (pixels), through
+    /// this PC's camera, e.g. to draw a friend's cursor.
+    pub fn coop_window_position(&mut self, x: i32, y: i32) -> (f64, f64) {
+        self.mutate_with_update_context(|context| {
+            let point = context.stage.view_matrix() * context.stage.coop_camera() * Point::new(Twips::new(x), Twips::new(y));
+            (point.x.to_pixels(), point.y.to_pixels())
+        })
+    }
+
+    /// Ruffle Together: whether a click at the stage point (x, y) (twips) lands on something the
+    /// game made clickable: what shows the hand cursor (buttons, button-mode clips, links). Reads
+    /// only game state, so every PC answers the same.
+    pub fn coop_clickable_at(&mut self, x: i32, y: i32) -> bool {
+        let saved = self.mouse_position;
+        self.mouse_position = Point::new(Twips::new(x), Twips::new(y));
+        let hand = self.mutate_with_update_context(|context| {
+            run_mouse_pick(context, true).is_some_and(|object| object.mouse_cursor(context) == MouseCursor::Hand)
+        });
+        self.mouse_position = saved;
+        hand
+    }
+
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).
     pub fn stage_to_viewport(&mut self, x: i32, y: i32) -> (f64, f64) {
         let matrix = self.mutate_with_update_context(|context| context.stage.view_matrix());

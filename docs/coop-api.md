@@ -46,7 +46,7 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.isHost` | **local** | `true` on the host's PC |
 | `coop.ping(slot)` | **local** | This PC's round trip to that player in ms (0 to itself; `undefined` until measured, about 2 s). Friend to friend goes through the host, so it's both trips added |
 | `coop.version` | shared | API version: 2 |
-| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat` |
+| `coop.has(feature)` | shared | `true` if this build has it: `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`, `chat`, `clicks`, `zones` |
 
 ### Input
 
@@ -56,11 +56,28 @@ local value that reaches gameplay makes the PCs' games split (the window title s
 | `coop.button(slot, name)` | shared | `true` while that player holds the button (`"FIRE"`, `"KEY1"`...); `undefined` for an unknown name |
 | `coop.mouseX(slot)`, `coop.mouseY(slot)` | shared | That player's mouse in stage pixels (each PC's cursor goes through its own camera, so these are game coordinates). (0, 0) until it moves |
 | `coop.mouseDown(slot)` | shared | `true` while that player's left button is down |
+| `coop.clicked(slot)` | shared | `true` on the frame that player pressed their left button (whether or not the click reached the game) |
 | `coop.typed(slot)` | shared | What that player typed this frame, `"\b"` for Backspace and `"\n"` for Enter. Calling it tells Ruffle the game wants every typed character for the next 60 frames (see "Typing" below) |
 | `coop.keys(text)` | shared | The game's own key map, in the `.keys` format (`"slot 0: UP=38 FIRE=32\n..."`), used from the next frame on every PC; held keys are let go first; the same map again changes nothing. `true` if it parsed |
 
 `coop.buttons` is the easy way to add players to a single-player game: read each slot's buttons and move
 each character, instead of faking keyboard keys.
+
+### Who may click
+
+Flash has one mouse. By default only the host's clicks reach the game (every PC still knows every player's
+mouse through `coop.mouseX` and friends). A game can let friends click too:
+
+| Call | Kind | Effect |
+|---|---|---|
+| `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
+| `coop.zone(slot, x, y, w, h)` | shared | A box (stage pixels) only that player may click, e.g. their own card on a character screen; nobody else's click inside counts, the host's included. Areas outside every box are open. `coop.zone(slot)` clears that player's boxes |
+
+A key map can set both without changing the SWF: `mouse: buttons` and `zone 1: 290,95 200x190` (player 2's
+box). A friend's click moves the game's mouse to their point for the click and back to the host's after, so
+hover effects can flicker while friends click. One click at a time: a click while another player's button is
+down is dropped. For hover or drags of its own (a slider every player can move), a game sets `coop.mouse("host")`
+on that screen and uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
 
 ### Host settings
 
@@ -97,6 +114,7 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 | **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 13 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected, typed text only reaches `coop.typed`; instead each player's key press types its game key's character (from any key map, `coop.keys` included, and in scripts and replays), so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
+| **Friends' cursors** | While friends may click (`mouse: buttons` or `all`), each window shows the other players' mice as an arrow in their colour with their name (picture only) |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |
 | **Save** | Everyone starts from the host's co-op save (`--coop-save coop\|solo\|new`), and every PC keeps the session's saves in its own co-op save, so anyone can host next time |

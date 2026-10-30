@@ -316,3 +316,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (Space). A built-in map and the same `.keys` file get the same id (name + text hash), so both can meet.
   Tests 149/149, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d; ChaosFaction2_coop.swf match2.txt 3000
   frames: built-in and file both 1748d03d. Not released yet (next release).
+- Friends' clicks (user: "1 + 2 + 5 (but whenever the game allows the click) and maybe 9"): key map `mouse: host|buttons|all`
+  and `zone N: X,Y WxH`, API `coop.mouse`, `coop.zone`, `coop.clicked`; friends' cursors drawn while friends may
+  click. "buttons" = Ruffle's hand-cursor test at the friend's point. Test SWF desktop/tests/coop/clicks; demo:
+  Bob clicks Red, Ann Blue, Ann refused on Bob's switch (his zone), Bob's switch ON, Bob refused on empty floor,
+  Green: both windows' logs identical (frames 147-302). Replay twice 3fa99a8d, relay room Q6DSQ 1500 frames
+  desync_at=none. Tests 153/153, replays BIC/GM2/TW unchanged. Found: a game's coop.keys reset the click rules;
+  now a map changes them only if it has `mouse:`/`zone` lines.

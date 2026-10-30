@@ -58,6 +58,20 @@ class RuffleTogether {
     public static function mouseY(slot:Number):Number { return active() ? Number(send("coop.mouseY", slot)) : _root._ymouse; }
     public static function mouseDown(slot:Number):Boolean { return active() ? send("coop.mouseDown", slot) == true : false; }
 
+    /** True on the frame that player pressed their left button. */
+    public static function clicked(slot:Number):Boolean { return send("coop.clicked", slot) == true; }
+
+    /** Who may click the game: "host" (the default), "buttons" (friends on clickable things too) or "all". */
+    public static function mouse(mode:String):Boolean { return send("coop.mouse", mode) == true; }
+
+    /** A box (stage pixels) only that player may click. */
+    public static function zone(slot:Number, x:Number, y:Number, w:Number, h:Number):Boolean {
+        return send("coop.zone", slot, x, y, w, h) == true;
+    }
+
+    /** Clears that player's boxes. */
+    public static function zoneOff(slot:Number):Boolean { return send("coop.zone", slot) == true; }
+
     /** Slot's camera: stage point (x, y) at the middle of that player's screen, zoom 1 = normal. Call it for every slot. */
     public static function camera(slot:Number, x:Number, y:Number, zoom:Number):Boolean {
         return send("coop.camera", slot, x, y, zoom == undefined ? 1 : zoom) == true;

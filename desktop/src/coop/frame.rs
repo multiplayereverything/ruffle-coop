@@ -3,7 +3,7 @@
 //! and timers and the frame clock move by exactly one frame each time.
 
 use crate::coop::api::{CoopApi, CoopApiProvider};
-use crate::coop::keymap::{Game, GameKeys};
+use crate::coop::keymap::{Game, GameKeys, MouseMode, Zone};
 use crate::coop::lockstep::{InputFrame, typed_event};
 use ruffle_core::events::MouseButton;
 use ruffle_core::limits::ExecutionLimit;
@@ -19,16 +19,24 @@ pub struct Stepper {
     game_keys: Option<String>,
     /// What the game can ask through ExternalInterface (every slot's mouse, the players).
     api: Arc<Mutex<CoopApi>>,
+    /// Each slot's last mouse, and whose click the game's one mouse button is down for.
+    mice: [Option<(i32, i32, bool)>; crate::coop::lockstep::MAX_PLAYERS],
+    clicking: Option<u8>,
 }
 
 impl Stepper {
     pub fn new(keys: GameKeys, players: u8, local_slot: u8) -> Self {
+        let mut api = CoopApi::new(players, local_slot);
+        api.mouse_mode = keys.mouse.unwrap_or_default();
+        api.zones = keys.zones.clone();
         Self {
             keys,
             mouse: None,
             loaded: false,
             game_keys: None,
-            api: Arc::new(Mutex::new(CoopApi::new(players, local_slot))),
+            api: Arc::new(Mutex::new(api)),
+            mice: [None; crate::coop::lockstep::MAX_PLAYERS],
+            clicking: None,
         }
     }
 
@@ -71,29 +79,7 @@ impl Stepper {
                 }
             }
         }
-        let mouse = inputs.first().and_then(|input| input.mouse);
-        if mouse != self.mouse
-            && let Some((x, y, down)) = mouse
-        {
-            // inputs carry stage positions, used exactly as they are on every PC (the window
-            // position below is only for Ruffle's event plumbing)
-            player.set_stage_mouse_override(Some((x, y)));
-            let (x, y) = player.stage_to_viewport(x, y);
-            player.handle_event(PlayerEvent::MouseMove { x, y });
-            let was_down = self.mouse.is_some_and(|(_, _, down)| down);
-            let button = MouseButton::Left;
-            if down && !was_down {
-                player.handle_event(PlayerEvent::MouseDown {
-                    x,
-                    y,
-                    button,
-                    index: Some(0),
-                });
-            } else if was_down && !down {
-                player.handle_event(PlayerEvent::MouseUp { x, y, button });
-            }
-        }
-        self.mouse = mouse;
+        self.feed_mice(player, inputs);
 
         let frame = Duration::from_secs_f64(1.0 / player.frame_rate());
         player.run_frame();
@@ -104,6 +90,82 @@ impl Stepper {
         // rendering has side effects on the game (e.g. scrollRect updates), so it happens
         // exactly once per frame on every PC
         player.render();
+    }
+
+    /// The game has one mouse. It rests where the host's is; each player's click (the host's
+    /// first) moves it to that player's point for the click, and back to the host's after. Who
+    /// may click is the key map's or the game's rule: the host only, friends too on what the game
+    /// made clickable, or anyone anywhere; nobody in a box that belongs to someone else. One
+    /// click at a time, since Flash has one mouse button. Everything comes from inputs and game
+    /// state, so every PC does the same.
+    fn feed_mice(&mut self, player: &mut Player, inputs: &[InputFrame]) {
+        let (mode, zones) = self.api.lock().map(|api| (api.mouse_mode, api.zones.clone())).unwrap_or_default();
+        let host = inputs.first().and_then(|input| input.mouse);
+        if host != self.mouse
+            && let Some((x, y, _)) = host
+            && self.clicking.is_none_or(|slot| slot == 0)
+        {
+            move_mouse(player, x, y);
+        }
+        self.mouse = host;
+        for (slot, input) in inputs.iter().enumerate().take(self.mice.len()) {
+            let before = self.mice[slot];
+            let Some((x, y, down)) = input.mouse else {
+                continue;
+            };
+            self.mice[slot] = input.mouse;
+            let was_down = before.is_some_and(|(_, _, down)| down);
+            let slot = slot as u8;
+            if self.clicking == Some(slot) {
+                if slot > 0 && before.is_some_and(|(bx, by, _)| (bx, by) != (x, y)) {
+                    move_mouse(player, x, y); // a friend's drag
+                }
+                if !down {
+                    let (vx, vy) = player.stage_to_viewport(x, y);
+                    player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
+                    self.clicking = None;
+                    if slot > 0
+                        && let Some((hx, hy, _)) = self.mouse
+                    {
+                        move_mouse(player, hx, hy);
+                    }
+                }
+            } else if down && !was_down && self.clicking.is_none() {
+                let allowed = Zone::allows(&zones, slot, x, y)
+                    && match mode {
+                        _ if slot == 0 => true,
+                        MouseMode::Host => false,
+                        MouseMode::Buttons => player.coop_clickable_at(x, y),
+                        MouseMode::All => true,
+                    };
+                if allowed {
+                    if slot > 0 {
+                        move_mouse(player, x, y);
+                    }
+                    let (vx, vy) = player.stage_to_viewport(x, y);
+                    player.handle_event(PlayerEvent::MouseDown { x: vx, y: vy, button: MouseButton::Left, index: Some(0) });
+                    self.clicking = Some(slot);
+                }
+            }
+        }
+    }
+
+    /// The other players' mice (slot, stage twips, button), while friends may click the game:
+    /// for the window to draw.
+    pub fn friend_cursors(&self) -> Vec<(u8, i32, i32, bool)> {
+        let Ok(api) = self.api.lock() else {
+            return vec![];
+        };
+        if api.mouse_mode == MouseMode::Host {
+            return vec![];
+        }
+        (0..api.players)
+            .filter(|&slot| slot != api.local_slot && self.mice[slot as usize].is_some())
+            .map(|slot| {
+                let (x, y, down) = api.mouse[slot as usize];
+                (slot, x, y, down)
+            })
+            .collect()
     }
 
     /// Something the game hears through `coop.events` ("join 1", "leave 2", "chat 0 hi"...);
@@ -161,6 +223,13 @@ impl Stepper {
                 player.handle_event(event);
             }
             self.keys = game.keys();
+            // the game's own map changes who may click only if it says so
+            if let Some(mode) = self.keys.mouse {
+                api.mouse_mode = mode;
+            }
+            if !self.keys.zones.is_empty() {
+                api.zones = self.keys.zones.clone();
+            }
         }
         player.set_coop_camera(api.local_camera().map(|c| (c.x, c.y, c.zoom)));
     }
@@ -171,6 +240,14 @@ impl Stepper {
             player.handle_event(event);
         }
     }
+}
+
+/// Moves the game's mouse to the stage point (x, y) (twips). Inputs carry stage positions, used
+/// exactly as they are on every PC (the window position is only for Ruffle's event plumbing).
+fn move_mouse(player: &mut Player, x: i32, y: i32) {
+    player.set_stage_mouse_override(Some((x, y)));
+    let (x, y) = player.stage_to_viewport(x, y);
+    player.handle_event(PlayerEvent::MouseMove { x, y });
 }
 
 #[cfg(test)]
@@ -367,6 +444,74 @@ mod tests {
         stepper.step(&mut player, &[none, fire]);
         let presses = traces.lock().expect("traces").iter().filter(|t| *t == "keyPress a").count();
         assert_eq!(presses, 1);
+    }
+
+    /// Friends' clicks (a test SWF: a button-mode button at 100,100 100x60 traces "button" when
+    /// clicked, any press traces "down X,Y"). By default only the host clicks; `mouse: buttons`
+    /// lets a friend click what the game made clickable and nothing else; `all` anywhere; a zone
+    /// keeps its box to its owner. The game's mouse rests at the host's after a friend's click.
+    #[test]
+    fn friends_click_what_the_rules_allow() {
+        let swf = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/coop/clicks/Clicks.swf");
+        let run = |rules: &str, clicks: &[(usize, i32, i32)]| -> Vec<String> {
+            let movie = ruffle_core::tag_utils::movie_from_path(&swf, None).expect("test swf");
+            let traces = Arc::new(Mutex::new(vec![]));
+            let player = PlayerBuilder::new().with_movie(movie).with_log(Traces(traces.clone())).with_autoplay(true).build();
+            let mut player = player.lock().expect("player");
+            let keys = Game::parse("t", &format!("slot 0: FIRE=32
+slot 1: FIRE=32
+{rules}")).expect("map").keys();
+            let mut stepper = Stepper::new(keys, 2, 0);
+            let at = |x: i32, y: i32, down: bool| Some((x * 20, y * 20, down));
+            let rest = || [InputFrame { mouse: at(10, 10, false), ..Default::default() }, InputFrame::default()];
+            stepper.step(&mut player, &rest());
+            for &(slot, x, y) in clicks {
+                for down in [true, false] {
+                    let mut inputs = rest();
+                    inputs[slot].mouse = at(x, y, down);
+                    stepper.step(&mut player, &inputs);
+                }
+            }
+            stepper.step(&mut player, &rest());
+            assert_eq!(player.mouse_position_twips(), (200, 200), "the mouse rests at the host's");
+            traces.lock().expect("traces").clone()
+        };
+        let on_button = [(1, 150, 130)];
+        let off_button = [(1, 300, 250)];
+        assert_eq!(run("", &on_button), Vec::<String>::new(), "only the host clicks by default");
+        assert_eq!(run("", &[(0, 150, 130)]), ["down 150,130", "button"]);
+        assert_eq!(run("mouse: buttons", &on_button), ["down 150,130", "button"]);
+        assert_eq!(run("mouse: buttons", &off_button), Vec::<String>::new(), "not on something clickable");
+        assert_eq!(run("mouse: all", &off_button), ["down 300,250"]);
+        let zone = "mouse: buttons
+zone 0: 90,90 130x80";
+        assert_eq!(run(zone, &on_button), Vec::<String>::new(), "the host's box");
+        assert_eq!(run(zone, &[(0, 150, 130)]), ["down 150,130", "button"]);
+        assert_eq!(run("mouse: buttons", &[(1, 150, 130), (0, 300, 250)]), ["down 150,130", "button", "down 300,250"]);
+    }
+
+    /// A game's own `coop.keys` map without `mouse:` or `zone` lines keeps the click rules the
+    /// game set (the API demo sets `coop.mouse("buttons")`, then its key map).
+    #[test]
+    fn a_game_key_map_keeps_the_click_rules() {
+        let swf = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/coop/clicks/Clicks.swf");
+        let movie = ruffle_core::tag_utils::movie_from_path(&swf, None).expect("test swf");
+        let player = PlayerBuilder::new().with_movie(movie).with_autoplay(true).build();
+        let mut player = player.lock().expect("player");
+        let keys = Game::parse("t", "slot 0: FIRE=32
+slot 1: FIRE=32").expect("map").keys();
+        let mut stepper = Stepper::new(keys, 2, 0);
+        stepper.step(&mut player, &[InputFrame::default(), InputFrame::default()]);
+        {
+            let mut api = stepper.api().lock().expect("api");
+            api.answer("coop.mouse", &[Value::String("buttons".into())]);
+            api.answer("coop.zone", &[1.0, 1.0, 2.0, 3.0, 4.0].map(Value::Number));
+            api.answer("coop.keys", &[Value::String("slot 0: FIRE=13
+slot 1: FIRE=13".into())]);
+        }
+        stepper.apply_game_calls(&mut player);
+        let api = stepper.api().lock().expect("api");
+        assert_eq!((api.mouse_mode, api.zones.len()), (MouseMode::Buttons, 1));
     }
 
     /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.

@@ -1195,6 +1195,16 @@ impl Session {
         pings
     }
 
+    /// The other players' cursors (name, slot, stage twips, button), while friends may click.
+    pub fn friend_cursors(&self) -> Vec<(String, u8, i32, i32, bool)> {
+        self.stepper
+            .friend_cursors()
+            .into_iter()
+            .filter(|&(slot, ..)| !self.lockstep.is_gone(slot))
+            .map(|(slot, x, y, down)| (self.name(slot), slot, x, y, down))
+            .collect()
+    }
+
     /// The name tags the game asked for (`coop.label`), for the window to draw.
     pub fn labels(&self) -> Vec<crate::coop::api::Label> {
         self.stepper.labels()

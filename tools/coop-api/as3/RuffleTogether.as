@@ -54,6 +54,20 @@ package {
         public static function mouseY(slot:int):Number { return active() ? Number(send("coop.mouseY", slot)) : NaN; }
         public static function mouseDown(slot:int):Boolean { return active() && send("coop.mouseDown", slot) == true; }
 
+        /** True on the frame that player pressed their left button. */
+        public static function clicked(slot:int):Boolean { return send("coop.clicked", slot) == true; }
+
+        /** Who may click the game: "host" (the default), "buttons" (friends on clickable things too) or "all". */
+        public static function mouse(mode:String):Boolean { return send("coop.mouse", mode) == true; }
+
+        /** A box (stage pixels) only that player may click. */
+        public static function zone(slot:int, x:Number, y:Number, w:Number, h:Number):Boolean {
+            return send("coop.zone", slot, x, y, w, h) == true;
+        }
+
+        /** Clears that player's boxes. */
+        public static function zoneOff(slot:int):Boolean { return send("coop.zone", slot) == true; }
+
         /** Slot's camera: stage point (x, y) at the middle of that player's screen, zoom 1 = normal. Call it for every slot. */
         public static function camera(slot:int, x:Number, y:Number, zoom:Number = 1):Boolean {
             return send("coop.camera", slot, x, y, zoom) == true;
