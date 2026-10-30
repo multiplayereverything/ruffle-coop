@@ -53,13 +53,22 @@ impl Stepper {
             api.update(inputs);
         }
         player.set_mouse_in_stage(true);
+        // Characters reach the game from one place only, or a key would type twice: while a text
+        // box is selected, what the players typed (names, chat); otherwise each slot's key press
+        // types its game key's character (on(keyPress "a") buttons), whatever key map it comes
+        // from and whoever pressed it (keyboard, script, replay). Game state, so the same on
+        // every PC.
+        let text_box = player.coop_text_box_focused();
         for (slot, input) in inputs.iter().enumerate() {
             for event in self.keys.events(slot as u8, input.buttons) {
-                player.handle_event(event);
+                if !(text_box && matches!(event, PlayerEvent::TextInput { .. })) {
+                    player.handle_event(event);
+                }
             }
-            // what each player typed, in slot order: names, chat, keyPress buttons
-            for &c in input.text.chars() {
-                player.handle_event(typed_event(c));
+            if text_box {
+                for &c in input.text.chars() {
+                    player.handle_event(typed_event(c));
+                }
             }
         }
         let mouse = inputs.first().and_then(|input| input.mouse);
@@ -332,6 +341,32 @@ mod tests {
         stepper.step(&mut player, &[typed("!"), InputFrame::default()]);
         stepper.step(&mut player, &[InputFrame { buttons: FIRE, ..Default::default() }, InputFrame::default()]);
         assert_eq!(traces.lock().expect("traces").last().map(String::as_str), Some("Liax!"));
+    }
+
+    /// Ruffle's own AS2 keyPress test (on(keyPress "a") traces "keyPress a"): a button press from
+    /// input alone (a script, a replay) reaches it, with a map like a game's own `coop.keys`, for
+    /// a friend's slot too, and only once while held.
+    #[test]
+    fn a_pressed_button_reaches_keypress_buttons() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/tests/swfs");
+        let movie =
+            ruffle_core::tag_utils::movie_from_path(root.join("avm1/button_key_events/test.swf"), None).expect("test swf");
+        let traces = Arc::new(Mutex::new(vec![]));
+        let player = PlayerBuilder::new()
+            .with_movie(movie)
+            .with_log(Traces(traces.clone()))
+            .with_autoplay(true)
+            .build();
+        let mut player = player.lock().expect("player");
+        let keys = Game::parse("game", "slot 0: FIRE=65\nslot 1: FIRE=65").expect("map").keys();
+        let mut stepper = Stepper::new(keys, 2, 0);
+        let none = InputFrame::default();
+        let fire = InputFrame { buttons: FIRE, ..Default::default() };
+        stepper.step(&mut player, &[none, none]);
+        stepper.step(&mut player, &[none, fire]);
+        stepper.step(&mut player, &[none, fire]);
+        let presses = traces.lock().expect("traces").iter().filter(|t| *t == "keyPress a").count();
+        assert_eq!(presses, 1);
     }
 
     /// Bad Ice-Cream, headless (needs COOP_TEST_SWF), and a Stepper for `local_slot`.

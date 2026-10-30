@@ -167,16 +167,6 @@ impl Game {
         self.local.iter().any(|(local, _)| *local == code)
     }
 
-    /// Whether one of this PC's mapped keys types `c` (a letter, digit or space).
-    pub fn has_local_char(&self, c: char) -> bool {
-        let code = match c {
-            'a'..='z' => c.to_ascii_uppercase() as u32,
-            'A'..='Z' | '0'..='9' | ' ' => c as u32,
-            _ => return false,
-        };
-        self.local.iter().any(|(local, _)| *local == code)
-    }
-
     pub fn local_buttons(&self, held: &HashSet<PhysicalKey>) -> u16 {
         let mut buttons = 0;
         for &key in held {
@@ -280,6 +270,10 @@ impl GameKeys {
             let (was, is) = (before & game_key.button != 0, buttons & game_key.button != 0);
             if is && !was {
                 events.push(PlayerEvent::KeyDown { key: game_key.key });
+                // a real keyboard also types the character: on(keyPress "a") hears only that
+                if let LogicalKey::Character(codepoint) = game_key.key.logical_key {
+                    events.push(PlayerEvent::TextInput { codepoint });
+                }
             } else if was && !is {
                 events.push(PlayerEvent::KeyUp { key: game_key.key });
             }
@@ -566,20 +560,38 @@ mod tests {
         }
     }
 
-    /// Keys don't type: what a player types travels on its own (`InputFrame::text`), or a real
-    /// keyboard would type every mapped key twice. Which characters this PC's own keys type
-    /// decides what may travel while no text box is selected.
+    /// AS2 buttons' on(keyPress "a") hear the typed character, not the key: a slot's key press
+    /// also types its game key's character, as a real keyboard does, for any map (built in or
+    /// the game's own from `coop.keys`). Named keys (arrows, Enter, Ctrl) type nothing.
     #[test]
-    fn keys_dont_type_and_which_characters_this_pcs_keys_type() {
+    fn a_key_press_types_its_character() {
+        let typed = |events: &[PlayerEvent]| -> Vec<char> {
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    PlayerEvent::TextInput { codepoint } => Some(*codepoint),
+                    _ => None,
+                })
+                .collect()
+        };
         let mut keys = game("ultimate-crab-battle").keys();
-        let events = keys.events(0, KEY1 | FIRE);
-        assert!(!events.iter().any(|e| matches!(e, PlayerEvent::TextInput { .. })), "{events:?}");
-        let gm2 = game("gun-mayhem-2");
-        for (c, mapped) in [('z', true), ('Z', true), ('t', true), ('w', true), ('p', false), ('1', false), ('!', false)] {
-            assert_eq!(gm2.has_local_char(c), mapped, "{c}");
-        }
-        assert!(game("ultimate-crab-battle").has_local_char('1'));
-        assert!(game("bad-ice-cream").has_local_char(' '));
+        let events = keys.events(0, KEY1);
+        assert_eq!(typed(&events), vec!['1']);
+        let down = events.iter().position(|e| matches!(e, PlayerEvent::KeyDown { .. }));
+        let text = events.iter().position(|e| matches!(e, PlayerEvent::TextInput { .. }));
+        assert!(down < text, "the key goes down before its character, as from winit");
+        assert!(typed(&keys.events(0, KEY1)).is_empty(), "held: typed once");
+        assert!(typed(&keys.events(0, 0)).is_empty(), "a release types nothing");
+        assert!(typed(&keys.events(0, UP | ALT)).is_empty(), "arrows and Ctrl type nothing");
+        // a game's own map (Dad 'n Me: every player's FIRE is A)
+        let mut keys = Game::parse("game", "slot 0: LEFT=37 FIRE=65 ALT=83
+slot 1: LEFT=37 FIRE=65 ALT=83").expect("map").keys();
+        assert_eq!(typed(&keys.events(1, FIRE | LEFT)), vec!['a']);
+        assert_eq!(typed(&keys.events(0, ALT)), vec!['s']);
+        // shared keys type once, when the first player presses them
+        let mut keys = game("territory-war").keys();
+        assert_eq!(typed(&keys.events(0, KEY1)), vec!['1']);
+        assert!(typed(&keys.events(1, KEY1)).is_empty());
     }
 
     /// Esc is an ordinary key: nothing unless the map gives it a button.

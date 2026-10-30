@@ -804,9 +804,10 @@ impl Session {
     }
 
     /// A character this PC typed (or a text key, see `lockstep::text_control_char`): every PC
-    /// types it into the game, on the frame it travels with. Only while a text box is selected or
-    /// the game reads `coop.typed`; otherwise only a key of the key map types (keyPress buttons),
-    /// so a stray key can't trigger a game's shortcut for everyone.
+    /// types it into the selected text box, on the frame it travels with. Only while a text box is
+    /// selected or the game reads `coop.typed`; otherwise the key map's keys type their own
+    /// characters (keyPress buttons, see `Stepper::step`), so a stray key can't trigger a game's
+    /// shortcut for everyone.
     pub fn typed(&mut self, c: char, text_box: bool) {
         if let Some(text) = &mut self.chat_box {
             // the "/" that opened the box types itself too: leave it out
@@ -815,9 +816,7 @@ impl Session {
             }
             return;
         }
-        let wanted = text_box || self.stepper.wants_text();
-        let text_key = crate::coop::lockstep::is_text_control(c);
-        if self.focused && (wanted || (!text_key && self.game.has_local_char(c))) {
+        if self.focused && (text_box || self.stepper.wants_text()) {
             self.typed.push_back(c);
         }
     }

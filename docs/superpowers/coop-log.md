@@ -295,3 +295,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   fix; pausing removed) + version. Tests 147/147, replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay
   room HD659 1500 frames in sync with the release exe, zip SHA-256 ff93d7ab...6efb, latest, re-downloaded hash
   matches. mods-info 7a97236.
+- keyPress buttons again (Dad 'n Me's report via the Flash folder session): in --coop-replay an A press didn't
+  trigger on(keyPress "a") menu buttons. The typing change (933c613) had removed 4a3cd49's "a key press types
+  its character", so only a real keyboard's own character could reach them, and only for the launch map's local
+  keys (not a game's coop.keys map, not scripts or replays). Now each slot's key press types its game key's
+  character again, from any map, while no text box is selected; while one is, only what players typed goes in
+  (no double letters). Untouched DadNMe.swf, A presses only: 1.0.3.7 stays on PLAY, the fix reaches the park.
+  Tests 148/148, replays BIC fa623659 / GM2 8e30f66c / TW identical to the 1.0.3.7 exe.
