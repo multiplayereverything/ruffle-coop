@@ -7,8 +7,9 @@
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
 //! ExternalInterface.call("coop.clicked", slot)   true on the frame that slot pressed its left button
-//! ExternalInterface.call("coop.mouse", mode)     who may click the game: "host", "buttons" (friends on
-//!                                                clickable things too) or "all"
+//! ExternalInterface.call("coop.mouse", mode)     who may click the game: "host", "zones" (friends only in
+//!                                                their own zone), "buttons" (friends on clickable things
+//!                                                too) or "all"
 //! ExternalInterface.call("coop.zone", slot, x, y, w, h)  only that slot may click in the box; (slot) clears its boxes
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined

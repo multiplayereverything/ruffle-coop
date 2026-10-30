@@ -9,8 +9,9 @@
 //! slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
 //! slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
 //! local: UP=38,87 DOWN=40,83 FIRE=90,84     keys a player presses on their own PC, per button
-//! mouse: buttons                            who may click: host (the default), buttons (friends
-//!                                           too, on what the game made clickable), all
+//! mouse: buttons                            who may click: host (the default), zones (friends only
+//!                                           in their own zone), buttons (friends on what the game
+//!                                           made clickable), all
 //! zone 1: 290,95 200x190                    only player 2 may click in this box (stage pixels)
 //! ```
 
@@ -59,6 +60,10 @@ pub enum MouseMode {
     /// Only the host's mouse reaches the game (every PC still knows every player's mouse).
     #[default]
     Host,
+    /// A friend's clicks only inside their own zone (and on something clickable there): a
+    /// character screen where each player picks on their own card. The host clicks everywhere
+    /// but other players' zones.
+    Zones,
     /// Every player's clicks, but a friend's only on something the game made clickable (what
     /// shows the hand cursor).
     Buttons,
@@ -70,6 +75,7 @@ impl MouseMode {
     pub fn named(name: &str) -> Option<Self> {
         match name {
             "host" => Some(Self::Host),
+            "zones" => Some(Self::Zones),
             "buttons" => Some(Self::Buttons),
             "all" => Some(Self::All),
             _ => None,
@@ -159,7 +165,7 @@ impl Game {
             } else if line == "shared" {
                 game.shared = true;
             } else if let Some(mode) = line.strip_prefix("mouse:") {
-                game.mouse = MouseMode::named(mode.trim()).map(Some).ok_or_else(|| fail(format!("mouse is host, buttons or all: {mode}")))?;
+                game.mouse = MouseMode::named(mode.trim()).map(Some).ok_or_else(|| fail(format!("mouse is host, zones, buttons or all: {mode}")))?;
             } else if let Some(rest) = line.strip_prefix("zone ") {
                 let zone = (|| {
                     let (slot, rest) = rest.split_once(':')?;
@@ -748,11 +754,12 @@ local: FIRE=27").expect("map");
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyT])), KEY1);
         assert_eq!(cf.local_buttons(&held(&[PhysicalKey::KeyD])), KEY2);
         // the character screen: friends click their own card, the P2 drop-down is the host's
-        assert_eq!(keys.mouse, Some(MouseMode::Buttons));
+        assert_eq!(keys.mouse, Some(MouseMode::Zones));
         let px = |p: i32| p * 20;
-        assert!(Zone::allows(&keys.zones, 1, px(463), px(272)) && !Zone::allows(&keys.zones, 0, px(463), px(272)));
-        assert!(Zone::allows(&keys.zones, 0, px(118), px(272)) && !Zone::allows(&keys.zones, 1, px(118), px(272)));
-        assert!(!Zone::allows(&keys.zones, 1, px(483), px(175)), "the P2 drop-down");
+        let own = |slot: u8, x: i32, y: i32| keys.zones.iter().any(|z| z.slot == slot && z.contains(px(x), px(y)));
+        assert!(own(1, 463, 272), "the P2 card's arrow");
+        assert!(!own(1, 118, 272) && !own(1, 483, 175) && !own(1, 747, 125), "P1's card, the drop-down, the next arrow");
+        assert!(!Zone::allows(&keys.zones, 0, px(463), px(272)), "the host stays off the P2 card");
     }
 
     #[test]

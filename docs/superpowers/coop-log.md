@@ -328,3 +328,7 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   hers, Bob flips his, each refused on the other's card, Bob refused on the drop-down, Bob may pick for P3 (open);
   into the fight, replays identical (ed74c5a5), relay room FPLU4 3600 frames desync_at=none, two windows same.
   The mod's own mod/chaos-faction-2.keys (used by the launcher until the next release) needs the same lines.
+- User tried it: "the other player can click anything. i wanted this to work only on their character selection."
+  New `mouse: zones`: a friend's clicks count only in their own zone (on clickable things); the host everywhere but
+  others' zones. Chaos Faction 2's map: `mouse: zones`, `zone 1: 302,190 194x163` (P2 card below the drop-down).
+  Replay: Bob's own card changes, his P3 click is refused now.

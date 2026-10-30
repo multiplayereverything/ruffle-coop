@@ -61,7 +61,7 @@ class RuffleTogether {
     /** True on the frame that player pressed their left button. */
     public static function clicked(slot:Number):Boolean { return send("coop.clicked", slot) == true; }
 
-    /** Who may click the game: "host" (the default), "buttons" (friends on clickable things too) or "all". */
+    /** Who may click the game: "host" (the default), "zones" (friends only in their own zone), "buttons" (friends on clickable things) or "all". */
     public static function mouse(mode:String):Boolean { return send("coop.mouse", mode) == true; }
 
     /** A box (stage pixels) only that player may click. */

@@ -95,7 +95,7 @@ impl Stepper {
     /// The game has one mouse. It rests where the host's is; each player's click (the host's
     /// first) moves it to that player's point for the click, and back to the host's after. Who
     /// may click is the key map's or the game's rule: the host only, friends too on what the game
-    /// made clickable, or anyone anywhere; nobody in a box that belongs to someone else. One
+    /// made clickable (anywhere, or only in their own zone), or anyone anywhere; nobody in a box that belongs to someone else. One
     /// click at a time, since Flash has one mouse button. Everything comes from inputs and game
     /// state, so every PC does the same.
     fn feed_mice(&mut self, player: &mut Player, inputs: &[InputFrame]) {
@@ -135,6 +135,9 @@ impl Stepper {
                     && match mode {
                         _ if slot == 0 => true,
                         MouseMode::Host => false,
+                        MouseMode::Zones => {
+                            zones.iter().any(|zone| zone.slot == slot && zone.contains(x, y)) && player.coop_clickable_at(x, y)
+                        }
                         MouseMode::Buttons => player.coop_clickable_at(x, y),
                         MouseMode::All => true,
                     };
@@ -488,6 +491,13 @@ zone 0: 90,90 130x80";
         assert_eq!(run(zone, &on_button), Vec::<String>::new(), "the host's box");
         assert_eq!(run(zone, &[(0, 150, 130)]), ["down 150,130", "button"]);
         assert_eq!(run("mouse: buttons", &[(1, 150, 130), (0, 300, 250)]), ["down 150,130", "button", "down 300,250"]);
+        // `zones`: a friend only in their own box, the host everywhere else
+        assert_eq!(run("mouse: zones", &on_button), Vec::<String>::new(), "no box of their own");
+        let own = "mouse: zones
+zone 1: 90,90 130x80";
+        assert_eq!(run(own, &on_button), ["down 150,130", "button"]);
+        assert_eq!(run(own, &[(0, 150, 130)]), Vec::<String>::new(), "the friend's box");
+        assert_eq!(run(own, &[(0, 300, 250)]), ["down 300,250"]);
     }
 
     /// A game's own `coop.keys` map without `mouse:` or `zone` lines keeps the click rules the

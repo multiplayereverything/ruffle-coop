@@ -70,11 +70,11 @@ mouse through `coop.mouseX` and friends). A game can let friends click too:
 
 | Call | Kind | Effect |
 |---|---|---|
-| `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
+| `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"zones"`: a friend's clicks count only inside their own zone (below) and on something clickable there, like their own card on a character screen; the host clicks everything else. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
 | `coop.zone(slot, x, y, w, h)` | shared | A box (stage pixels) only that player may click, e.g. their own card on a character screen; nobody else's click inside counts, the host's included. Areas outside every box are open. `coop.zone(slot)` clears that player's boxes |
 
-A key map can set both without changing the SWF: `mouse: buttons` and `zone 1: 290,95 200x190` (player 2's
-box). A friend's click moves the game's mouse to their point for the click and back to the host's after, so
+A key map can set both without changing the SWF: `mouse: zones` and `zone 1: 290,95 200x190` (player 2's
+box). Chaos Faction 2's built-in map does this for its character screen. A friend's click moves the game's mouse to their point for the click and back to the host's after, so
 hover effects can flicker while friends click. One click at a time: a click while another player's button is
 down is dropped. For hover or drags of its own (a slider every player can move), a game sets `coop.mouse("host")`
 on that screen and uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
@@ -114,7 +114,7 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 | **Key maps** | Each player's keys press that player's keys in the game (`--coop-keys NAME` or a `.keys` file; 13 built in) |
 | **Typing** | What players type goes into the game's selected text box on every PC (names, chat), in player order, Backspace and Enter included. While no text box is selected, typed text only reaches `coop.typed`; instead each player's key press types its game key's character (from any key map, `coop.keys` included, and in scripts and replays), so `on(keyPress "1")` buttons work but stray keys can't trigger a game's shortcuts. A paste becomes the sender's clipboard text (64 characters at most); copy is ignored and cut deletes |
 | **Leaving** | A friend who leaves or drops out no longer stops the game: everyone else plays on and sees "Sam left". Losing the host still ends it |
-| **Friends' cursors** | While friends may click (`mouse: buttons` or `all`), each window shows the other players' mice as an arrow in their colour with their name (picture only) |
+| **Friends' cursors** | While friends may click (`mouse: zones`, `buttons` or `all`), each window shows the other players' mice as an arrow in their colour with their name (picture only) |
 | **Chat** | `/` opens a chat box (unless the key map gives `/` to the game); Enter sends, Esc closes. Keys don't reach the game while it's open. Lines show bottom left and reach the game as `chat` events |
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |
 | **Save** | Everyone starts from the host's co-op save (`--coop-save coop\|solo\|new`), and every PC keeps the session's saves in its own co-op save, so anyone can host next time |
