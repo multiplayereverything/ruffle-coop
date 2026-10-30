@@ -6,7 +6,9 @@
 slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32
 slot 1: UP=104 DOWN=101 LEFT=100 RIGHT=102 FIRE=97 ALT=98 KEY1=105 KEY2=99 KEY3=96
 local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32
-# Character screen: the friend clicks only their own card (P2's, below its header: not the Keyboard 2
-# drop-down); the host clicks everything else but that.
+# Character screen: the friend clicks only the buttons of their own card (_root.players.p2: arrows, Edit
+# Player), not its Keyboard 2 drop-down (the host's); the host clicks everything else. These clips exist
+# only on the players page, so every other screen is the host's alone.
 mouse: zones
-zone 1: 302,190 194x163
+zone 1: _root.players.p2
+zone 0: _root.players.p2.combo

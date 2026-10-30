@@ -71,13 +71,17 @@ mouse through `coop.mouseX` and friends). A game can let friends click too:
 | Call | Kind | Effect |
 |---|---|---|
 | `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"zones"`: a friend's clicks count only inside their own zone (below) and on something clickable there, like their own card on a character screen; the host clicks everything else. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
-| `coop.zone(slot, x, y, w, h)` | shared | A box (stage pixels) only that player may click, e.g. their own card on a character screen; nobody else's click inside counts, the host's included. Areas outside every box are open. `coop.zone(slot)` clears that player's boxes |
+| `coop.zone(slot, path)` | shared | The buttons inside the clip at `path` (`"_root.players.p2"`) belong to that player: their own card on a character screen. Nobody else's click on them counts, the host's included. It only applies while that clip is on show, so other screens are untouched. When zones nest, the most exact clip wins (`zone 0: _root.players.p2.combo` gives a card's drop-down back to the host) |
+| `coop.zone(slot, x, y, w, h)` | shared | The same for a box (stage pixels). A box applies on every screen, so prefer a clip. `coop.zone(slot)` clears that player's zones |
 
-A key map can set both without changing the SWF: `mouse: zones` and `zone 1: 290,95 200x190` (player 2's
-box). Chaos Faction 2's built-in map does this for its character screen. A friend's click moves the game's mouse to their point for the click and back to the host's after, so
-hover effects can flicker while friends click. One click at a time: a click while another player's button is
-down is dropped. For hover or drags of its own (a slider every player can move), a game sets `coop.mouse("host")`
-on that screen and uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
+A key map can set both without changing the SWF: `mouse: zones` and `zone 1: _root.players.p2` (player 2's
+card). Chaos Faction 2's built-in map does this for its character screen. A friend's click moves the game's
+mouse to their point for the click and back to the host's after, so hover effects can flicker while friends
+click. One click at a time, but the host's click always goes through (a friend's held click is let go first).
+To find a button's path for a zone, turn friends' clicks on (`mouse: buttons`) and click it once: the log
+(`%LOCALAPPDATA%\ruffle\log\ruffle.log`) says e.g. `player 2 clicks _root.players.p2.b10 (463, 272)`. For hover
+or drags of its own (a slider every player can move), a game sets `coop.mouse("host")` on that screen and
+uses `coop.mouseX/mouseY/mouseDown(slot)` and `coop.clicked(slot)` itself.
 
 ### Host settings
 

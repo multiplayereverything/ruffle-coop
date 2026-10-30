@@ -65,7 +65,10 @@ package {
             return send("coop.zone", slot, x, y, w, h) == true;
         }
 
-        /** Clears that player's boxes. */
+        /** The buttons inside the clip at path ("_root.players.p2") belong to that player, while it is on show. */
+        public static function zoneClip(slot:int, path:String):Boolean { return send("coop.zone", slot, path) == true; }
+
+        /** Clears that player's zones. */
         public static function zoneOff(slot:int):Boolean { return send("coop.zone", slot) == true; }
 
         /** Slot's camera: stage point (x, y) at the middle of that player's screen, zoom 1 = normal. Call it for every slot. */

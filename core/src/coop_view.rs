@@ -23,6 +23,23 @@ pub fn find<'gc>(context: &UpdateContext<'gc>, path: &str) -> Option<DisplayObje
     Some(object)
 }
 
+/// The path of `object` in the form `find` reads: `_root`, then instance names joined by dots.
+pub fn path_of<'gc>(context: &UpdateContext<'gc>, object: DisplayObject<'gc>) -> String {
+    let root = context.stage.root_clip();
+    let mut names = vec![];
+    let mut current = Some(object);
+    while let Some(o) = current {
+        if root.is_some_and(|root| DisplayObject::ptr_eq(root, o)) {
+            break;
+        }
+        names.push(o.name().map(|n| n.to_utf8_lossy().into_owned()).unwrap_or_default());
+        current = o.parent();
+    }
+    names.push("_root".into());
+    names.reverse();
+    names.join(".")
+}
+
 /// Marks the clip at `path` as HUD (drawn without the camera); false if there is none.
 pub fn set_hud(context: &mut UpdateContext<'_>, path: &str) -> bool {
     find(context, path).map(|object| object.set_coop_hud(true)).is_some()

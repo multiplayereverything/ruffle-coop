@@ -143,7 +143,14 @@ impl Stepper {
                     player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
                     tracing::info!("Ruffle Together: player {}'s held click let go for the host's", friend + 1);
                 }
-                if may_click(player, mode, &zones, slot, x, y) {
+                let allowed = may_click(player, mode, &zones, slot, x, y);
+                if mode != MouseMode::Host {
+                    // for key map authors: what each click lands on (a zone names these paths)
+                    let target = player.coop_click_target(x, y).unwrap_or_else(|| "nothing clickable".into());
+                    let verdict = if allowed { "clicks" } else { "may not click" };
+                    tracing::info!("Ruffle Together: player {} {verdict} {target} ({}, {})", slot + 1, x / 20, y / 20);
+                }
+                if allowed {
                     if slot > 0 {
                         move_mouse(player, x, y);
                     }
@@ -257,12 +264,14 @@ impl Stepper {
 /// else; the host anywhere else; a friend as the mode says: never (`host`), only in their own box
 /// (`zones`) or anywhere (`buttons`), on something the game made clickable, or anywhere (`all`).
 fn may_click(player: &mut Player, mode: MouseMode, zones: &[Zone], slot: u8, x: i32, y: i32) -> bool {
-    Zone::allows(zones, slot, x, y)
+    let target = player.coop_click_target(x, y);
+    let target = target.as_deref();
+    Zone::allows(zones, slot, x, y, target)
         && match mode {
             _ if slot == 0 => true,
             MouseMode::Host => false,
-            MouseMode::Zones => zones.iter().any(|zone| zone.slot == slot && zone.contains(x, y)) && player.coop_clickable_at(x, y),
-            MouseMode::Buttons => player.coop_clickable_at(x, y),
+            MouseMode::Zones => target.is_some() && Zone::is_own(zones, slot, x, y, target),
+            MouseMode::Buttons => target.is_some(),
             MouseMode::All => true,
         }
 }

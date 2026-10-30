@@ -337,3 +337,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   every button counted as a press), so the host's clicks were dropped. Fix: the host's click always goes through
   (a held friend's click is let go first), only the left button presses, a window losing focus lets go of its
   button. Test: a friend stuck down doesn't block the host. 153/153, replays unchanged.
+- User: the host couldn't click Start!/Settings/Level Editor (Credits worked). Cause: key-map zones were fixed boxes on
+  every screen; Bob's character-card box covered the title menu (and let Bob click it). Fix: a zone can name a clip
+  (`zone 1: _root.players.p2`): it covers only buttons inside that clip, only while it is on show; the most exact
+  clip wins (`zone 0: _root.players.p2.combo` keeps the drop-down the host's). Paths found by asking Ruffle what
+  each click lands on (now logged while friends may click). CF2 replay: Bob's Settings click on the title refused,
+  Ann's Start! works, Bob's card only; replays identical (7fa064fb), relay room 2G9E9 3600 frames desync_at=none.
+  153/153, BIC/GM2/TW unchanged.

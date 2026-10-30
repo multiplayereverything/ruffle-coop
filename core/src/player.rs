@@ -1043,13 +1043,21 @@ impl Player {
     /// game made clickable: what shows the hand cursor (buttons, button-mode clips, links). Reads
     /// only game state, so every PC answers the same.
     pub fn coop_clickable_at(&mut self, x: i32, y: i32) -> bool {
+        self.coop_click_target(x, y).is_some()
+    }
+
+    /// Ruffle Together: the path (`_root.menu.p2.next`) of what a click at the stage point
+    /// (x, y) (twips) would land on, if the game made it clickable (see `coop_clickable_at`).
+    pub fn coop_click_target(&mut self, x: i32, y: i32) -> Option<String> {
         let saved = self.mouse_position;
         self.mouse_position = Point::new(Twips::new(x), Twips::new(y));
-        let hand = self.mutate_with_update_context(|context| {
-            run_mouse_pick(context, true).is_some_and(|object| object.mouse_cursor(context) == MouseCursor::Hand)
+        let target = self.mutate_with_update_context(|context| {
+            run_mouse_pick(context, true)
+                .filter(|object| object.mouse_cursor(context) == MouseCursor::Hand)
+                .map(|object| crate::coop_view::path_of(context, object.as_displayobject()))
         });
         self.mouse_position = saved;
-        hand
+        target
     }
 
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).

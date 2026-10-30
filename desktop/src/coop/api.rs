@@ -185,8 +185,18 @@ impl CoopApi {
             },
             ("coop.zone", Some(slot)) => match (number(1), number(2), number(3), number(4)) {
                 (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
-                    self.zones.push(crate::coop::keymap::Zone { slot: slot as u8, x, y, width, height });
+                    let area = crate::coop::keymap::ZoneArea::Box { x, y, width, height };
+                    self.zones.push(crate::coop::keymap::Zone { slot: slot as u8, area });
                     Value::Bool(true)
+                }
+                _ if args.len() == 2 && text(1).is_some() => {
+                    match text(1).and_then(|path| crate::coop::keymap::Zone::parse(slot as u8, &path)) {
+                        Some(zone) => {
+                            self.zones.push(zone);
+                            Value::Bool(true)
+                        }
+                        None => Value::Bool(false),
+                    }
                 }
                 (None, None, None, None) if args.len() == 1 => {
                     self.zones.retain(|zone| zone.slot as usize != slot);
