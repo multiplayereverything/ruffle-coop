@@ -332,3 +332,8 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   New `mouse: zones`: a friend's clicks count only in their own zone (on clickable things); the host everywhere but
   others' zones. Chaos Faction 2's map: `mouse: zones`, `zone 1: 302,190 194x163` (P2 card below the drop-down).
   Replay: Bob's own card changes, his P3 click is refused now.
+- User: "weird bugs with the mouse ... the host can't click". Cause: one click at a time, and a friend's click could
+  stay "held" forever (release outside their window, or a right click whose release Ruffle's menu swallows, since
+  every button counted as a press), so the host's clicks were dropped. Fix: the host's click always goes through
+  (a held friend's click is let go first), only the left button presses, a window losing focus lets go of its
+  button. Test: a friend stuck down doesn't block the host. 153/153, replays unchanged.

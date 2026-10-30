@@ -95,9 +95,10 @@ impl Stepper {
     /// The game has one mouse. It rests where the host's is; each player's click (the host's
     /// first) moves it to that player's point for the click, and back to the host's after. Who
     /// may click is the key map's or the game's rule: the host only, friends too on what the game
-    /// made clickable (anywhere, or only in their own zone), or anyone anywhere; nobody in a box that belongs to someone else. One
-    /// click at a time, since Flash has one mouse button. Everything comes from inputs and game
-    /// state, so every PC does the same.
+    /// made clickable (anywhere, or only in their own zone), or anyone anywhere; nobody in a box
+    /// that belongs to someone else. One click at a time, since Flash has one mouse button, but
+    /// the host's click always goes through. Everything comes from inputs and game state, so
+    /// every PC does the same.
     fn feed_mice(&mut self, player: &mut Player, inputs: &[InputFrame]) {
         let (mode, zones) = self.api.lock().map(|api| (api.mouse_mode, api.zones.clone())).unwrap_or_default();
         let host = inputs.first().and_then(|input| input.mouse);
@@ -130,7 +131,18 @@ impl Stepper {
                         move_mouse(player, hx, hy);
                     }
                 }
-            } else if down && !was_down && self.clicking.is_none() {
+            } else if down && !was_down && (self.clicking.is_none() || slot == 0) {
+                if slot == 0
+                    && let Some(friend) = self.clicking.take()
+                {
+                    // the host never waits on a friend: a friend's click still held (a release
+                    // that never came, e.g. let go outside their window) is let go where the host
+                    // clicks, then the host's click goes through
+                    move_mouse(player, x, y);
+                    let (vx, vy) = player.stage_to_viewport(x, y);
+                    player.handle_event(PlayerEvent::MouseUp { x: vx, y: vy, button: MouseButton::Left });
+                    tracing::info!("Ruffle Together: player {}'s held click let go for the host's", friend + 1);
+                }
                 if may_click(player, mode, &zones, slot, x, y) {
                     if slot > 0 {
                         move_mouse(player, x, y);
@@ -508,6 +520,29 @@ zone 1: 90,90 130x80";
         assert_eq!(run(own, &on_button), ["down 150,130", "button"]);
         assert_eq!(run(own, &[(0, 150, 130)]), Vec::<String>::new(), "the friend's box");
         assert_eq!(run(own, &[(0, 300, 250)]), ["down 300,250"]);
+        // a friend's click that never lets go (released outside their window) doesn't lock the
+        // host out: it is let go where the host clicks (here the same button), then the host clicks
+        let stuck = |rules: &str| {
+            let movie = ruffle_core::tag_utils::movie_from_path(&swf, None).expect("test swf");
+            let traces = Arc::new(Mutex::new(vec![]));
+            let player = PlayerBuilder::new().with_movie(movie).with_log(Traces(traces.clone())).with_autoplay(true).build();
+            let mut player = player.lock().expect("player");
+            let keys = Game::parse("t", &format!("slot 0: FIRE=32
+slot 1: FIRE=32
+{rules}")).expect("map").keys();
+            let mut stepper = Stepper::new(keys, 2, 0);
+            let at = |x: i32, y: i32, down: bool| Some((x * 20, y * 20, down));
+            let frame = |host, friend| [InputFrame { mouse: host, ..Default::default() }, InputFrame { mouse: friend, ..Default::default() }];
+            stepper.step(&mut player, &frame(at(10, 10, false), None));
+            stepper.step(&mut player, &frame(at(10, 10, false), at(150, 130, true))); // the friend presses, forever
+            for _ in 0..3 {
+                stepper.step(&mut player, &frame(at(10, 10, false), at(150, 130, true)));
+            }
+            stepper.step(&mut player, &frame(at(150, 130, true), at(150, 130, true)));
+            stepper.step(&mut player, &frame(at(150, 130, false), at(150, 130, true)));
+            traces.lock().expect("traces").clone()
+        };
+        assert_eq!(stuck("mouse: buttons"), ["down 150,130", "button", "down 150,130", "button"], "the host still clicks");
     }
 
     /// A game's own `coop.keys` map without `mouse:` or `zone` lines keeps the click rules the

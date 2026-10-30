@@ -826,6 +826,10 @@ impl Session {
         self.focused = focused;
         if !focused {
             self.held.clear();
+            // a window that loses focus lets go of its mouse button too (its release may never come)
+            if let Some((x, y, true)) = self.mouse {
+                self.mouse = Some((x, y, false));
+            }
         }
     }
 
