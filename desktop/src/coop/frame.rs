@@ -131,17 +131,7 @@ impl Stepper {
                     }
                 }
             } else if down && !was_down && self.clicking.is_none() {
-                let allowed = Zone::allows(&zones, slot, x, y)
-                    && match mode {
-                        _ if slot == 0 => true,
-                        MouseMode::Host => false,
-                        MouseMode::Zones => {
-                            zones.iter().any(|zone| zone.slot == slot && zone.contains(x, y)) && player.coop_clickable_at(x, y)
-                        }
-                        MouseMode::Buttons => player.coop_clickable_at(x, y),
-                        MouseMode::All => true,
-                    };
-                if allowed {
+                if may_click(player, mode, &zones, slot, x, y) {
                     if slot > 0 {
                         move_mouse(player, x, y);
                     }
@@ -153,21 +143,27 @@ impl Stepper {
         }
     }
 
-    /// The other players' mice (slot, stage twips, button), while friends may click the game:
-    /// for the window to draw.
-    pub fn friend_cursors(&self) -> Vec<(u8, i32, i32, bool)> {
-        let Ok(api) = self.api.lock() else {
+    /// The other players' mice (slot, stage twips, button) for the window to draw, only while
+    /// one is over something that player may click (their own card on a character screen); none
+    /// at all while only the host clicks. The picture only.
+    pub fn friend_cursors(&self, player: &mut Player) -> Vec<(u8, i32, i32, bool)> {
+        let Ok((mode, zones, mice, players, local)) = self
+            .api
+            .lock()
+            .map(|api| (api.mouse_mode, api.zones.clone(), api.mouse, api.players, api.local_slot))
+        else {
             return vec![];
         };
-        if api.mouse_mode == MouseMode::Host {
+        if mode == MouseMode::Host {
             return vec![];
         }
-        (0..api.players)
-            .filter(|&slot| slot != api.local_slot && self.mice[slot as usize].is_some())
+        (0..players)
+            .filter(|&slot| slot != local && self.mice[slot as usize].is_some())
             .map(|slot| {
-                let (x, y, down) = api.mouse[slot as usize];
+                let (x, y, down) = mice[slot as usize];
                 (slot, x, y, down)
             })
+            .filter(|&(slot, x, y, _)| may_click(player, mode, &zones, slot, x, y) && player.coop_clickable_at(x, y))
             .collect()
     }
 
@@ -243,6 +239,20 @@ impl Stepper {
             player.handle_event(event);
         }
     }
+}
+
+/// May `slot` click at the stage point (x, y) (twips)? Never in a box that belongs to someone
+/// else; the host anywhere else; a friend as the mode says: never (`host`), only in their own box
+/// (`zones`) or anywhere (`buttons`), on something the game made clickable, or anywhere (`all`).
+fn may_click(player: &mut Player, mode: MouseMode, zones: &[Zone], slot: u8, x: i32, y: i32) -> bool {
+    Zone::allows(zones, slot, x, y)
+        && match mode {
+            _ if slot == 0 => true,
+            MouseMode::Host => false,
+            MouseMode::Zones => zones.iter().any(|zone| zone.slot == slot && zone.contains(x, y)) && player.coop_clickable_at(x, y),
+            MouseMode::Buttons => player.coop_clickable_at(x, y),
+            MouseMode::All => true,
+        }
 }
 
 /// Moves the game's mouse to the stage point (x, y) (twips). Inputs carry stage positions, used

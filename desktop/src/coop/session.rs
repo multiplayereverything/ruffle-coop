@@ -1195,10 +1195,11 @@ impl Session {
         pings
     }
 
-    /// The other players' cursors (name, slot, stage twips, button), while friends may click.
-    pub fn friend_cursors(&self) -> Vec<(String, u8, i32, i32, bool)> {
+    /// The other players' cursors (name, slot, stage twips, button), only while one is over
+    /// something that player may click.
+    pub fn friend_cursors(&self, player: &mut ruffle_core::Player) -> Vec<(String, u8, i32, i32, bool)> {
         self.stepper
-            .friend_cursors()
+            .friend_cursors(player)
             .into_iter()
             .filter(|&(slot, ..)| !self.lockstep.is_gone(slot))
             .map(|(slot, x, y, down)| (self.name(slot), slot, x, y, down))
