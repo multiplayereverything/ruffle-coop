@@ -1,6 +1,6 @@
 # Ruffle Together
 
-Version 1.0.3.7 (build id `rc-1.0.3.7#<commit>`; players must use the same build).
+Version 1.0.3.8 (build id `rc-1.0.3.8#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with up to 3 friends. Every PC runs the same game in this Ruffle
 build; only the key presses travel, and every frame runs on every PC with every player's keys. Everyone gets
@@ -57,7 +57,8 @@ The relay needs the `ruffle-coop` game in mods-info first.
   as above; `solo` is the host's solo save even if it has a co-op one; `new` starts the game as if new. With
   `solo` or `new` the host's co-op save is replaced the first time the game saves (each friend's too).
 - **Typing:** names and chat typed in the game's own text boxes reach the game for everyone (any key, capitals,
-  Backspace, Enter, paste). While no text box is selected, only your mapped keys type.
+  Backspace, Enter, paste). While no text box is selected, only your mapped keys type: each types the game
+  key it presses (so menus' keyPress buttons work, also in scripts and replays).
 - **Chat:** `/` opens a chat box; Enter sends, Esc closes. Your keys don't reach the game while it's open.
 - **Leaving:** a friend who leaves or drops out doesn't stop the game: everyone else plays on ("Sam left").
   If the host leaves, the game ends.
