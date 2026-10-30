@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/ruffle-together-logo.png" alt="Ruffle Together" width="360">
+  <img src="assets/brand/ruffle-together-logo.png" alt="Ruffle Together" width="250">
 </p>
 
 <p align="center"><b>Play local-multiplayer Flash games online with up to 3 friends.</b></p>
