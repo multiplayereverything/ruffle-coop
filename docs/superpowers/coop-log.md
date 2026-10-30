@@ -359,3 +359,11 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   buttons are _root.players.pN.instanceK, found from the click log). Windows: Bob's editor only on Bob's screen, Ann's
   Edit Player refused with the notice, after Bob's Cancel Ann's opens only on hers, Bob's refused. Replays identical
   (5b2d0408), relay room GHRMG 2800 frames desync_at=none. Tests 154/154, replays BIC/GM2/TW unchanged.
+- Hover (user: "hovering doesnt work now at all", then "this is not even the original game's highlight ... you
+  just made smth custom"): parking the game's mouse off the stage killed all hover and also mouse-move effects
+  (Chaos Faction 2's help bubble stayed up, covering Bob's arrows); the white outline I drew was custom. Chaos
+  Faction 2's highlights (the yellow arrows, the glow) are made by its code, so they can only follow one mouse. User
+  chose the game's real hover: `hover: host` is the default again and in Chaos Faction 2's map; the outline is gone.
+  Kept as options: `hover: own` (per PC, only Button symbols' own Up/Over art, built from their records without
+  running code; nothing custom) and `hover: off`. Tests 154/154, replays BIC/GM2/TW unchanged, Chaos Faction 2
+  replays identical (18b022a3), relay room F72NH 2800 frames desync_at=none.

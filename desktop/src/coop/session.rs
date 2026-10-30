@@ -987,6 +987,9 @@ impl Session {
                     }
                 }
             }
+            // this player's own hover: their live mouse (a script's when scripted)
+            let own = self.mouse.or_else(|| inputs.get(self.local_index as usize).and_then(|input| input.mouse));
+            self.stepper.set_local_mouse(own.map(|(x, y, _)| (x, y)));
             self.stepper.step(player, &inputs);
             for (who, whose) in self.stepper.take_busy() {
                 if who == self.local_index {

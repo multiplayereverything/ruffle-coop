@@ -15,8 +15,8 @@
 //! ExternalInterface.call("coop.only", slot, path)  ... only that slot; coop.shared(path) makes it everyone's again
 //! ExternalInterface.call("coop.only", path, pattern)  ... and while it is someone's, nobody else may click the
 //!                                                buttons that open it (pattern: "_root.players.*.instance*")
-//! ExternalInterface.call("coop.hover", mode)     "off": the game's mouse rests off the stage between clicks (no
-//!                                                hover for anyone; the default while friends may click), "host"
+//! ExternalInterface.call("coop.hover", mode)     "host": the game's own hover follows the host (the default),
+//!                                                "own": Button symbols' Over art follows each player's mouse, "off"
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
@@ -98,7 +98,7 @@ pub struct CoopApi {
     pub zones: Vec<crate::coop::keymap::Zone>,
     /// Private screens: drawn only on their owner's PC, clicked only by them.
     pub privates: Vec<Private>,
-    /// Where the game's mouse rests between clicks while friends may click (None: off the stage).
+    /// How hover works while friends may click (None: the host's, as in the game).
     pub hover: Option<crate::coop::keymap::Hover>,
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],

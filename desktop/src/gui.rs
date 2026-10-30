@@ -106,7 +106,10 @@ impl RuffleGui {
 
         if let Some(player) = player.as_deref_mut() {
             let (labels, notice, chat, cursors) = crate::coop::session()
-                .map(|session| (session.labels(), session.notice(), session.chat_view(), session.friend_cursors(player)))
+                .map(|session| {
+                    let cursors = session.friend_cursors(player);
+                    (session.labels(), session.notice(), session.chat_view(), cursors)
+                })
                 .unwrap_or_default();
             show_chat(egui_ctx, &chat.0, chat.1.as_deref());
             show_labels(egui_ctx, player, &labels, menu_height_offset);

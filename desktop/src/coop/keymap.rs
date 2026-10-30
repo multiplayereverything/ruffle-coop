@@ -17,9 +17,9 @@
 //! zone 1: 290,95 200x190                    or in this box (stage pixels, on every screen)
 //! private: _root.pcb                        a pop-up only the player who opened it sees and clicks;
 //!   opened-by _root.players.*.instance*     ... and nobody else opens it while it is theirs
-//! hover: off                                the game's mouse rests off the stage between clicks, so
-//!                                           nobody's hover shows (the default while friends may
-//!                                           click); hover: host keeps it at the host's mouse
+//! hover: host                               the game's own hover follows the host's mouse, on every
+//!                                           screen (the default); own: Button symbols' own Over art
+//!                                           follows each player's mouse on their screen; off: none
 //! ```
 
 use crate::coop::lockstep::{MAX_PLAYERS, button_named};
@@ -64,19 +64,23 @@ pub struct Game {
     hover: Option<Hover>,
 }
 
-/// Where the game's one mouse rests between clicks while friends may click (`hover:` in a key
-/// map, or the game's `coop.hover`).
+/// How hover works while friends may click (`hover:` in a key map, or the game's `coop.hover`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hover {
-    /// At the host's mouse: the host's hover shows on every screen.
+    /// The game's mouse follows the host's, and each PC draws Button symbols in the game's own
+    /// Up/Over art by its own player's mouse (the picture only).
+    Own,
+    /// The game's mouse follows the host's: the game's own hover, the host's, on every screen
+    /// (the default).
     Host,
-    /// Off the stage: nobody's hover shows anywhere.
+    /// The game's mouse rests off the stage: no hover anywhere.
     Off,
 }
 
 impl Hover {
     pub fn named(name: &str) -> Option<Self> {
         match name {
+            "own" => Some(Self::Own),
             "host" => Some(Self::Host),
             "off" => Some(Self::Off),
             _ => None,
@@ -286,7 +290,7 @@ impl Game {
                 }
                 game.privates.push((path.to_string(), openers.map(str::to_string)));
             } else if let Some(hover) = line.strip_prefix("hover:") {
-                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is host or off: {hover}")))?);
+                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is own, host or off: {hover}")))?);
             } else if let Some(list) = line.strip_prefix("local:") {
                 for (button, codes) in pairs(list)? {
                     game.local.extend(codes.into_iter().map(|code| (code, button)));

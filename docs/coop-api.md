@@ -70,7 +70,7 @@ mouse through `coop.mouseX` and friends). A game can let friends click too:
 
 | Call | Kind | Effect |
 |---|---|---|
-| `coop.hover(mode)` | shared | Where the game's one mouse rests between clicks while friends may click: `"off"` (the default) off the stage, so nobody's hover shows on anyone's screen; `"host"` at the host's mouse (the host's hover shows everywhere, as when only the host clicks). Each player's own cursor shows on their own screen either way |
+| `coop.hover(mode)` | shared | Hover while friends may click. `"host"` (the default): the game's own hover follows the host's mouse, on every screen, exactly as the game does it (hover made by the game's code can only ever be one for everyone). `"own"`: the same, plus each PC draws Button symbols in the game's own Up/Over art by its own player's mouse (only where a Button symbol has its own Over art; nothing custom is drawn). `"off"`: the game's mouse rests off the stage between clicks, so there is no hover at all (mouse-move effects stop too). Each player's own cursor shows on their own screen either way |
 | `coop.mouse(mode)` | shared | `"host"` (the default): only the host clicks. `"zones"`: a friend's clicks count only inside their own zone (below) and on something clickable there, like their own card on a character screen; the host clicks everything else. `"buttons"`: friends' clicks too, but only on something the game made clickable (what shows the hand cursor: buttons, button-mode clips, links); a friend's click anywhere else does nothing. `"all"`: everyone's clicks, anywhere |
 | `coop.zone(slot, path)` | shared | The buttons inside the clip at `path` (`"_root.players.p2"`) belong to that player: their own card on a character screen. Nobody else's click on them counts, the host's included. It only applies while that clip is on show, so other screens are untouched. When zones nest, the most exact clip wins (`zone 0: _root.players.p2.combo` gives a card's drop-down back to the host) |
 | `coop.zone(slot, x, y, w, h)` | shared | The same for a box (stage pixels). A box applies on every screen, so prefer a clip. `coop.zone(slot)` clears that player's zones |
@@ -98,7 +98,7 @@ PC (no desync).
 | `coop.shared(path)` | shared | Everyone sees and clicks it again |
 
 A key map does the same without changing the SWF: `private: _root.pcb opened-by _root.players.*.instance*`
-(Chaos Faction 2's Player Editor and its Edit Player buttons), and `hover: host` or `hover: off`. It
+(Chaos Faction 2's Player Editor and its Edit Player buttons), and `hover: host`, `hover: own` or `hover: off`. It
 works with friends' clicks (`mouse: zones` or `buttons`): the player who opened the pop-up clicks it even
 outside their zone. Limits: the pop-up is still open in everyone's game, so a game that freezes the screen behind
 its pop-ups freezes it for everyone; `BitmapData.draw` of the stage still sees it on every PC.

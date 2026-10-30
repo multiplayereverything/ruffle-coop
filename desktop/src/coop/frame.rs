@@ -26,6 +26,8 @@ pub struct Stepper {
     last_clicker: Option<u8>,
     /// The game's mouse is resting off the stage (no hover for anyone).
     parked: bool,
+    /// This PC's own mouse right now (stage twips), for this player's own hover.
+    local_mouse: Option<(i32, i32)>,
     /// Clicks refused because another player has that private screen open: (who, whose).
     busy: Vec<(u8, u8)>,
 }
@@ -50,6 +52,7 @@ impl Stepper {
             clicking: None,
             last_clicker: None,
             parked: false,
+            local_mouse: None,
             busy: vec![],
         }
     }
@@ -100,6 +103,7 @@ impl Stepper {
         player.update_timers(FloatDuration::from_std(frame));
         self.apply_game_calls(player);
         self.update_privates(player);
+        self.show_own_hover(player);
         player.audio_mut().tick();
         player.advance_frame_clock(frame);
         // rendering has side effects on the game (e.g. scrollRect updates), so it happens
@@ -122,9 +126,10 @@ impl Stepper {
             .unwrap_or_default();
         // an open private screen is its owner's alone
         zones.extend(owned_zones(&privates));
-        // while friends may click, the game's mouse rests off the stage between clicks, so nobody's
-        // hover shows on anyone's screen (unless the game wants the host's)
-        let park = mode != MouseMode::Host && hover != Some(Hover::Host);
+        // `hover: off`: the game's mouse rests off the stage between clicks, so there is no hover
+        // at all; otherwise it follows the host's, as in the game (the default; with `own`, each
+        // PC then draws Button symbols by its own player's mouse)
+        let park = mode != MouseMode::Host && hover == Some(Hover::Off);
         let host = inputs.first().and_then(|input| input.mouse);
         if park {
             if !self.parked && self.clicking.is_none() {
@@ -253,6 +258,31 @@ impl Stepper {
                 })
             })
             .collect()
+    }
+
+    /// This PC's own mouse (stage twips), for this player's own hover.
+    pub fn set_local_mouse(&mut self, at: Option<(i32, i32)>) {
+        self.local_mouse = at;
+    }
+
+    /// `hover: own`: this PC draws Button symbols in the game's own Up/Over art by its own
+    /// player's mouse, where that player may click (the picture only; every PC's game is
+    /// unchanged). Hover made by the game's code still follows the host's mouse.
+    fn show_own_hover(&mut self, player: &mut Player) {
+        let Ok((mode, mut zones, privates, hover, local)) = self
+            .api
+            .lock()
+            .map(|api| (api.mouse_mode, api.zones.clone(), api.privates.clone(), api.hover, api.local_slot))
+        else {
+            return;
+        };
+        zones.extend(owned_zones(&privates));
+        let on = mode != MouseMode::Host && hover == Some(Hover::Own);
+        let at = self.local_mouse.filter(|_| on);
+        as_player(player, &privates, local, |player| {
+            let at = at.filter(|&(x, y)| may_click(player, mode, &zones, local, x, y));
+            player.coop_set_own_hover(on, at);
+        });
     }
 
     /// Clicks refused since the last call because another player had that private screen open:
@@ -650,8 +680,7 @@ slot 1: FIRE=32
                 }
             }
             stepper.step(&mut player, &rest());
-            let friends_click = rules.contains("mouse: ") && !rules.contains("hover: host");
-            let rest = if friends_click { PARKED } else { (200, 200) };
+            let rest = if rules.contains("hover: off") { PARKED } else { (200, 200) };
             assert_eq!(player.mouse_position_twips(), rest, "where the mouse rests ({rules})");
             traces.lock().expect("traces").clone()
         };
@@ -661,6 +690,7 @@ slot 1: FIRE=32
         assert_eq!(run("", &[(0, 150, 130)]), ["down 150,130", "button"]);
         assert_eq!(run("mouse: buttons", &on_button), ["down 150,130", "button"]);
         assert_eq!(run("mouse: buttons\nhover: host", &on_button), ["down 150,130", "button"], "hover at the host's");
+        assert_eq!(run("mouse: buttons\nhover: off", &on_button), ["down 150,130", "button"], "no hover: parked");
         assert_eq!(run("mouse: buttons", &off_button), Vec::<String>::new(), "not on something clickable");
         assert_eq!(run("mouse: all", &off_button), ["down 300,250"]);
         let zone = "mouse: buttons

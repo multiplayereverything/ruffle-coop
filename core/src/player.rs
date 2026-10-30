@@ -1081,6 +1081,50 @@ impl Player {
         self.mutate_with_update_context(|context| crate::coop_view::set_pickable(context, path, pickable))
     }
 
+    /// Ruffle Together: each player's own hover, on this PC only (the picture; the game's buttons
+    /// don't change). With `on`, Button symbols are drawn as this PC's player's mouse at `at`
+    /// (stage twips) sees them: the one under it in its Over art, the rest in Up art, whatever the
+    /// host's mouse does to the game. Only the game's own art: a button whose art can't be copied
+    /// that way, and hover made by the game's code, are drawn as the game has them.
+    pub fn coop_set_own_hover(&mut self, on: bool, at: Option<(i32, i32)>) {
+        let saved = self.mouse_position;
+        if let Some((x, y)) = at {
+            self.mouse_position = Point::new(Twips::new(x), Twips::new(y));
+        }
+        self.mutate_with_update_context(|context| {
+            context.stage.set_coop_own_hover(on);
+            if let Some(previous) = context.stage.coop_hovered() {
+                previous.base().set_coop_show_over(false);
+                context.stage.set_coop_hovered(context.gc(), None);
+            }
+            if !on {
+                return;
+            }
+            // the button the game's mouse (the host's) hovers is drawn Up here unless it is ours
+            if let Some(hovered) = context.mouse_data.hovered
+                && let Some(button) = hovered.as_displayobject().as_avm1_button()
+            {
+                button.coop_picture(context, crate::display_object::ButtonState::Up);
+            }
+            if at.is_none() {
+                return;
+            }
+            let Some(object) = run_mouse_pick(context, true).filter(|object| object.mouse_cursor(context) == MouseCursor::Hand)
+            else {
+                return;
+            };
+            let display = object.as_displayobject();
+            if let Some(button) = display.as_avm1_button()
+                && (button.coop_picture(context, crate::display_object::ButtonState::Over)
+                    || button.coop_state() != crate::display_object::ButtonState::Up)
+            {
+                display.base().set_coop_show_over(true);
+                context.stage.set_coop_hovered(context.gc(), Some(display));
+            }
+        });
+        self.mouse_position = saved;
+    }
+
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).
     pub fn stage_to_viewport(&mut self, x: i32, y: i32) -> (f64, f64) {
         let matrix = self.mutate_with_update_context(|context| context.stage.view_matrix());
