@@ -1204,7 +1204,6 @@ impl Session {
         self.lockstep.frame()
     }
 
-    /// What the window title shows.
     /// What Discord shows: the game, the room (or direct), how many play, and a Join button for
     /// a relay room when the launcher said which game this is.
     pub fn presence(&self) -> crate::coop::discord::Presence {
@@ -1223,6 +1222,7 @@ impl Session {
         }
     }
 
+    /// What the window title shows.
     pub fn title(&self) -> String {
         let mut title = String::from("Ruffle Together");
         if let Some(code) = &self.room {

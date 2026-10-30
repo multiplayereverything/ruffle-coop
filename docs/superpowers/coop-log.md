@@ -308,3 +308,6 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   room UB63M desync_at=none, two windows on the relay room UUMBX 5274 frames same fingerprint. Tests 148/148,
   replays BIC fa623659 / GM2 8e30f66c / TW ad6fe22d, live relay room NAZD9 in sync, zip SHA-256
   630847fe...8a59, latest, re-downloaded hash matches. mods-info 8f47aff.
+- Discord presence on (app id 1565524080453755040): two demo windows through the relay, the user's profile showed
+  "Ruffle Together / Playing CoopDemo / room 9V8V6 (2 of 2)". Asks for the art asset "logo" (not uploaded yet: a
+  "?" shows until it is). Join button still off (no join page yet).

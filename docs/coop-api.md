@@ -101,7 +101,7 @@ the sync check never see it. Paths are `_root` / `_level0` / `root` and then ins
 | **Same game everywhere** | Clock, `Date`, `Math.random`, timers, sound endings, script time limits and window size are the same on every PC |
 | **Save** | Everyone starts from the host's co-op save (`--coop-save coop\|solo\|new`), and every PC keeps the session's saves in its own co-op save, so anyone can host next time |
 | **Sync check** | Every 25 frames; the title says OUT OF SYNC and each PC writes a report of what differs |
-| **Discord** | "Playing GAME, room ABCDE", players in the game, and a Join button for relay rooms (once the app id and join page are set, see `desktop/src/coop/discord.rs`) |
+| **Discord** | "Ruffle Together: Playing GAME, room ABCDE (2 of 2)" on the profile of anyone who shares their activity. A Join button for relay rooms comes once the join page is set (see `desktop/src/coop/discord.rs`) |
 
 ## Join links
 
