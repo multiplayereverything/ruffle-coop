@@ -416,4 +416,4 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   GM2 8e30f66c, TW ad6fe22d; API demo 4p replay twice 10073f2d; CF2 replay twice 67a7e305; live relay
   165.232.82.11:25569 with the packaged exe: BIC 1500 frames (room EFM8K) and API demo 1500 frames (room UDRUE)
   desync_at=none. Zip sha256 ff4b25ad20b8dd677e0def2787ee18723009edc2820d575b151c4dfc0dea23e2 (re-downloaded, same),
-  exe 38d2b25287478d311818faa613935f93693dfe152eb3de1f6c4f57f9498ca034. mods-info not changed yet (asked first).
+  exe 38d2b25287478d311818faa613935f93693dfe152eb3de1f6c4f57f9498ca034. mods-info 12777dd (user: "bump mods-info"; rc-1.0.4, live). Read the Docs did not build 6fe08df (last build 78d91c9): the new page needs a manual build.
