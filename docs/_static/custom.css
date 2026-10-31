@@ -1,0 +1,9 @@
+/* Wide tables (the API reference) wrap instead of running off the page. */
+article table.docutils td,
+article table.docutils th {
+    white-space: normal;
+}
+
+.sidebar-logo {
+    max-width: 70%;
+}
