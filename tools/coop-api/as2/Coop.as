@@ -5,7 +5,7 @@
 //     Coop.camera.setPosition(1, 400, 300)
 //     if (Coop.mouse.clicker() == 2) ...
 //
-// Full reference: docs/coop-api.md in the ruffle-coop repository.
+// Full reference: docs/coop-api.md in https://github.com/multiplayereverything/ruffle-together
 // Every call is safe outside Ruffle Together: Coop.active() is false, one player, slot 0, mouse calls
 // read the game's own mouse, and calls that change something do nothing.
 

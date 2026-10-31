@@ -1,6 +1,6 @@
 # Ruffle Together: design
 
-Date: 2026-10-28. Fork: https://github.com/multiplayereverything/ruffle-coop (clean copy of ruffle-rs/ruffle, no
+Date: 2026-10-28. Fork: https://github.com/multiplayereverything/ruffle-together (renamed from ruffle-coop; clean copy of ruffle-rs/ruffle, no
 changes yet). First game: Bad Ice-Cream.
 
 ## Why

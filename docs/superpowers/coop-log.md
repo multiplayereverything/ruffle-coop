@@ -377,6 +377,19 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   846PM): every window logged Red f270, Blue f271, Green f272, player 4 refused on Bob's switch, Bob's switch ON.
   156/156, replays BIC/GM2/TW unchanged, Chaos Faction 2 replay unchanged (18b022a3). Seen: a name tag of a dot out
   of view is drawn outside the game area in a small window (picture only).
+- coop.hud inside a moved parent (Intrusion 1 session's report): a HUD clip undid the camera inside its parent's
+  transform, so in a game that scrolls by moving `_root` (Intrusion: _root._x ~6000, _root.ui at minus that) the
+  HUD landed (zoom-1) * root offset away, off screen. Now `coop_view::hud_matrix` = P^-1 * camera^-1 * P * own
+  (P: the parent in stage coordinates), so the HUD lands where it would with no camera. Culling needs no change:
+  the HUD's stage bounds are inside view_bounds' stage half. Intrusion_coop.swf rebuilt with N.CAMS = true (a
+  scratch copy), four.txt 1150 frames: 1.0.3.8 shows no HUD, the fix shows it where the cameras-off build does;
+  fingerprints identical (picture only). Tests 149/149 + core coop_view; replays BIC/GM2/TW unchanged. Not released.
+- Release 1.0.3.9 (1a56efb, user: "release it"): friends' clicks, zones, private screens, hover options, click
+  queue, Discord presence, chaos-faction-2 key map, coop.hud fix. Clean build, tests 156/156; replays BIC 1500
+  fa623659, GM2 4p 3300 8e30f66c, TW 3000 ad6fe22d; API demo replay twice identical (3fa99a8); live relay
+  165.232.82.11:25569 with the packaged exe: BIC 1500 frames and API demo 1500 frames desync_at=none. Zip sha256
+  d7d0a0560891193f6504b1d2fe19f2ee5cc6bbb20089be06b087eede746c4eb0 (re-downloaded, same); mods-info 2d5ecf1
+  (latest = min = 1.0.3.9).
 - One mouse per player (user: "proper multiple mouses ... proper hovering with the original hovering effects";
   plan in multi-mouse-plan.md). Ruffle's core keeps every player's mouse (`core/src/coop_mice.rs`): position,
   hovered, pressed, button; each player's events run with their mouse swapped in, so Ruffle's own hover, press,

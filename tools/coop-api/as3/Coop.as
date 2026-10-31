@@ -9,7 +9,7 @@ package {
      *     if (Coop.mouse.clicker() == 2) ...
      *
      * Copy every Coop*.as file of this folder into the game's source folder.
-     * Full reference: docs/coop-api.md in the ruffle-coop repository.
+     * Full reference: docs/coop-api.md in https://github.com/multiplayereverything/ruffle-together
      *
      * Every call is safe outside Ruffle Together (plain Flash Player or plain Ruffle): Coop.active() is
      * false, one player, slot 0, mouse calls return NaN (use the game's own mouse), and calls that change

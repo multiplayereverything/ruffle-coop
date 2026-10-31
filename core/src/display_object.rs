@@ -1007,9 +1007,16 @@ pub fn render_base<'gc>(
     if options.apply_transform {
         let mut transform = this.base().transform(options.apply_matrix);
         if this.is_coop_hud() && !context.is_offscreen {
-            // Ruffle Together: a HUD clip stays put on screen whatever the co-op camera does
-            if let Some(undo) = context.stage.coop_camera().inverse() {
-                transform.matrix = undo * transform.matrix;
+            // Ruffle Together: a HUD clip stays put on screen whatever the co-op camera does, also
+            // inside parents the game moves
+            let parent = this
+                .parent()
+                .filter(|parent| parent.as_stage().is_none())
+                .map_or(Matrix::IDENTITY, |parent| parent.local_to_global_matrix());
+            if let Some(matrix) =
+                crate::coop_view::hud_matrix(context.stage.coop_camera(), parent, transform.matrix)
+            {
+                transform.matrix = matrix;
             }
         }
         context.transform_stack.push(&transform);
