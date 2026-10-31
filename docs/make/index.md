@@ -20,7 +20,7 @@ Cameras, name tags and the player count come with it.
 :::
 
 :::{grid-item-card} 3. You're making a new game
-Build it with the [helper library](../api/library.md) from the start. It works as a normal single-player
+Build it with the [Coop library](../api/library.md) from the start. It works as a normal single-player
 game outside Ruffle Together, so one SWF works everywhere.
 
 {doc}`API reference → <../api/index>`

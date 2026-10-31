@@ -29,6 +29,7 @@ The central relay is `165.232.82.11:25569`.
 | `--coop-headless` | A whole session (with the host or join flags) without a window; prints `COOP RESULT ...` |
 | `--coop-script FILE` | The [input script](input-scripts.md) |
 | `--cache-directory DIR` | Give each window its own, to run several on one PC |
+| `--coop-mouse-debug` | Show every player's mouse, what it is on, and whether the rules let it be there. Next release |
 
 ## Files
 

@@ -15,13 +15,20 @@
 `players`, `mouse`, `name`, `camera`, `hud`, `label`, `keys`, `buttons`, `typed`, `options`, `ping`, `events`,
 `chat`, `clicks`, `zones`, `private`, `hover`
 
+Next release: `pointers` (one mouse per player), `clicker`, `hovered`, `cursors`.
+
 Check a feature before using it, so the game still runs on an older Ruffle Together:
 
 ```actionscript
-if (RuffleTogether.has("camera")) {
-    RuffleTogether.camera(slot, x, y, 1);
+if (Coop.room.has("clicker")) {
+    ready[Coop.mouse.clicker()] = true;   // whoever clicked
+} else {
+    ready[0] = true;                      // 1.0.3.9: only the host clicks
 }
 ```
+
+In the library, `coop.players` is `Coop.players.count()`, `coop.localSlot` is `Coop.players.local()`, and
+`coop.version` and `coop.has` are in `Coop.room`.
 
 ## Using local answers safely
 
@@ -29,8 +36,8 @@ if (RuffleTogether.has("camera")) {
 
 ```actionscript
 // fine: text in a field that exists on every PC
-youText.text = (slot == RuffleTogether.localSlot()) ? "YOU" : "";
+youText.text = (slot == Coop.players.local()) ? "YOU" : "";
 
 // wrong: the hero is moved on one PC only, and the games split
-if (slot == RuffleTogether.localSlot()) hero.x += 5;
+if (slot == Coop.players.local()) hero.x += 5;
 ```

@@ -7,6 +7,8 @@
 | `coop.mouseX(slot)`, `coop.mouseY(slot)` | shared | That player's mouse in stage pixels. Each PC's cursor goes through its own camera, so these are game coordinates. (0, 0) until it moves |
 | `coop.mouseDown(slot)` | shared | `true` while that player's left button is down |
 | `coop.clicked(slot)` | shared | `true` on the frame that player pressed their left button, whether or not the click reached the game |
+| `coop.mouse.clicker` | shared | Inside a mouse handler (`CLICK`, `onRelease`...), the slot whose mouse caused it; `undefined` elsewhere. Next release |
+| `coop.mouse.hovered(slot)` | shared | The path of what that player's mouse is on (`"_root.menu.sword"`), as of the last frame; `undefined` while on nothing clickable. Next release |
 | `coop.typed(slot)` | shared | What that player typed this frame: `"\b"` for Backspace, `"\n"` for Enter. Calling it tells Ruffle Together the game wants every typed character for the next 60 frames |
 | `coop.keys(text)` | shared | Sets the game's own key map, in the [`.keys` format](../make/key-maps.md). Used from the next frame on every PC; held keys are let go first; the same map again changes nothing. `true` if it parsed |
 
@@ -24,19 +26,25 @@
 | KEY2 | 128 | | |
 
 ```actionscript
-var held:int = RuffleTogether.buttons(1);
+var held:int = Coop.input.buttons(1);
 if (held & 16) fire(1);          // player 2 holds FIRE
-if (RuffleTogether.button(1, "LEFT")) walkLeft(1);
+if (Coop.input.held(1, "LEFT")) walkLeft(1);
 ```
 
 `coop.buttons` is the easy way to add players to a single-player game: read each slot's buttons and move each
 character, instead of faking keyboard keys.
 
-## The normal mouse
+In the library these are `Coop.input.buttons`, `held`, `typed`, `setKeys` and `Coop.mouse.x`, `y`, `down`,
+`clicked`, `clicker`, `hovered`.
 
-`_xmouse`, `_ymouse`, `stage.mouseX`, `stage.mouseY`, mouse events, buttons and `Mouse` listeners all follow the
-**host's** mouse on every PC. A game where every player aims with the mouse reads each slot through the API, slot 0
-included. To let friends click the game's own buttons, see [The mouse](mouse.md).
+## The game's own mouse
+
+Outside mouse handlers, `_xmouse`, `_ymouse`, `stage.mouseX` and `stage.mouseY` follow the **host's** mouse on every
+PC. A game where every player aims with the mouse reads each slot through the API, slot 0 included.
+
+From the next release every player has their own mouse in the game where the rules allow it: inside a handler,
+`stage.mouseX` / `_xmouse` is the mouse that caused it, and `coop.mouse.clicker` says whose it was. See
+[The mouse](mouse.md).
 
 ## Typing
 
@@ -48,5 +56,5 @@ selected, typed text only reaches `coop.typed`. See [What every game gets](autom
 A game can switch maps per screen, for example FIRE = Enter in menus and FIRE = Space in a match:
 
 ```actionscript
-RuffleTogether.keys(inMenu ? MENU_KEYS : MATCH_KEYS);
+Coop.input.setKeys(inMenu ? MENU_KEYS : MATCH_KEYS);
 ```

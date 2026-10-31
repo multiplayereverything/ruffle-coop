@@ -19,11 +19,16 @@
 
 - **Use `coop.buttons(slot)` to add players to a single-player game.** It's much simpler than faking keyboard keys
   for each hero.
-- **The normal mouse is the host's.** `_xmouse`, `stage.mouseX` and mouse events follow player 1 on every PC. To
-  aim with every player's mouse, read `coop.mouseX/mouseY(slot)`, slot 0 included.
+- **To aim with every player's mouse, read `coop.mouseX/mouseY(slot)`**, slot 0 included. Outside mouse handlers,
+  `_xmouse` and `stage.mouseX` are the host's.
+- **Let menus work for everyone without code changes** (next release): `mouse: buttons` gives friends their own
+  mouse on the game's buttons, and `coop.mouse.clicker` says who clicked a shared button such as "Ready".
+- **Give each player their own buttons with zones**, such as their card on a character screen, so nobody can
+  change someone else's pick.
 - **`on(keyPress "a")` buttons work.** Each player's key press types its game key's character, from any key map,
   so menu shortcuts work in co-op, replays and scripts.
 - **Find a button's path from the log.** Turn on `mouse: buttons`, click the button once, and the log names it.
+  From the next release, `--coop-mouse-debug` shows every player's mouse and what it is on.
 
 ## Picture
 

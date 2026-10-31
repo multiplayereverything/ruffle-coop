@@ -13,8 +13,8 @@ ruffle_desktop --coop-host-relay 165.232.82.11:25569 --coop-option friendly-fire
 ```
 
 ```actionscript
-var friendlyFire:Boolean = RuffleTogether.option("friendly-fire") == "on";
-var lives:int = int(RuffleTogether.option("lives") || "3");
+var friendlyFire:Boolean = Coop.room.option("friendly-fire") == "on";
+var lives:int = int(Coop.room.option("lives") || "3");
 ```
 
 For a dropdown in the Multiplayer Mods Launcher, list the options in the game's mods-info entry.

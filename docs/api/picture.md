@@ -3,12 +3,12 @@
 These change only the picture each PC draws. Positions, hit tests, `BitmapData.draw` of the stage and the sync
 check never see them.
 
-| Call | Effect |
-|---|---|
-| `coop.camera(slot, x, y, zoom)` | That player's camera: the stage point (x, y) at the middle of their screen. `zoom` 1 is normal (the default) |
-| `coop.camera(slot)` | Turns that player's camera off |
-| `coop.hud(path)` | The clip at `path` stays fixed on screen. It must be a direct child of the root (`"_root.hud"`, `"root.hud"`). The mark lasts as long as the clip |
-| `coop.label(slot, path, text)` | A name tag above the clip at `path`, drawn by Ruffle over the game on every PC. `""` removes it |
+| Call | Library | Effect |
+|---|---|---|
+| `coop.camera(slot, x, y, zoom)` | `Coop.camera.setView`, `setPosition`, `setZoom` | That player's camera: the stage point (x, y) at the middle of their screen. `zoom` 1 is normal (the default) |
+| `coop.camera(slot)` | `Coop.camera.off` | Turns that player's camera off |
+| `coop.hud(path)` | `Coop.view.pinHud` | The clip at `path` stays fixed on screen. It must be a direct child of the root (`"_root.hud"`, `"root.hud"`). The mark lasts as long as the clip |
+| `coop.label(slot, path, text)` | `Coop.view.label` | A name tag above the clip at `path`, drawn by Ruffle over the game on every PC. `""` removes it |
 
 Paths are `_root`, `_level0` or `root`, then instance names joined by dots.
 
@@ -18,8 +18,8 @@ Call `coop.camera` for **every** slot, each frame or whenever it changes, not ju
 same cameras and draws with its own slot's.
 
 ```actionscript
-for (var slot:int = 0; slot < RuffleTogether.players(); slot++) {
-    RuffleTogether.camera(slot, heroes[slot].x, heroes[slot].y, 1.5);
+for (var slot:int = 0; slot < Coop.players.count(); slot++) {
+    Coop.camera.setView(slot, heroes[slot].x, heroes[slot].y, 1.5);
 }
 ```
 
@@ -42,5 +42,5 @@ Ruffle draws labels over the game: white text with a shadow, centred above the c
 camera. The game never sees them.
 
 ```actionscript
-RuffleTogether.label(1, "_root.hero1", RuffleTogether.name(1));
+Coop.view.label(1, "_root.hero1", Coop.players.name(1));
 ```

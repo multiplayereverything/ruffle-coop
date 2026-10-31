@@ -13,7 +13,7 @@
 Read it **once per frame**: each call returns only what happened since the last one.
 
 ```actionscript
-for each (var event:String in RuffleTogether.events()) {
+for each (var event:String in Coop.room.events()) {
     var parts:Array = event.split(" ");
     var slot:int = int(parts[1]);
     if (parts[0] == "leave") heroes[slot].visible = false;

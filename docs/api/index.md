@@ -5,16 +5,24 @@ version **2** of the API.
 
 ## How to call it
 
-Every call goes through `ExternalInterface.call(name, args...)`, the same in AS2 and AS3:
+Use the [`Coop` library](library.md). It has the same names in AS2 and AS3, grouped by what they do:
+
+```actionscript
+var n:int = Coop.players.count();
+Coop.camera.setPosition(1, hero2.x, hero2.y);
+if (Coop.mouse.clicker() == 1) { ... }   // inside a button's CLICK / onRelease
+```
+
+Outside Ruffle Together it answers like a single-player game (1 player, slot 0, no camera), so one SWF works
+everywhere.
+
+Underneath, every call is `ExternalInterface.call(name, args...)`, the same in AS2 and AS3. The reference pages list
+each call under that raw name:
 
 ```actionscript
 var players = ExternalInterface.call("coop.players");
 var p2Fire = ExternalInterface.call("coop.button", 1, "FIRE");
 ```
-
-Easier: the [helper library](library.md), `RuffleTogether.players()`, `RuffleTogether.camera(0, x, y, 2)` and so on.
-Outside Ruffle Together it answers like a single-player game (1 player, slot 0, no camera), so one SWF works
-everywhere.
 
 - **In a session or not:** `ExternalInterface.available && ExternalInterface.call("coop.players") > 0`. In plain
   Ruffle or Flash Player this is false.
@@ -38,14 +46,19 @@ makes the PCs' games split, and the window title says OUT OF SYNC.
 
 ## Every call
 
-| Call | Kind | Page |
-|---|---|---|
-| `coop.players`, `coop.name`, `coop.version`, `coop.has` | shared | [Players](players.md) |
-| `coop.localSlot`, `coop.isHost`, `coop.ping` | **local** | [Players](players.md) |
-| `coop.buttons`, `coop.button`, `coop.mouseX`, `coop.mouseY`, `coop.mouseDown`, `coop.clicked`, `coop.typed`, `coop.keys` | shared | [Input](input.md) |
-| `coop.mouse`, `coop.zone`, `coop.hover`, `coop.only`, `coop.shared` | shared | [The mouse](mouse.md) |
-| `coop.option`, `coop.options` | shared | [Host settings](host-settings.md) |
-| `coop.camera`, `coop.hud`, `coop.label` | picture only | [Camera, HUD, labels](picture.md) |
-| `coop.events` | shared | [Events and chat](events.md) |
+| Call | Kind | Library | Page |
+|---|---|---|---|
+| `coop.players`, `coop.name`, `coop.localSlot`, `coop.isHost`, `coop.ping` | shared, except `localSlot`, `isHost`, `ping` (**local**) | `Coop.players` | [Players](players.md) |
+| `coop.buttons`, `coop.button`, `coop.typed`, `coop.keys` | shared | `Coop.input` | [Input](input.md) |
+| `coop.mouseX`, `coop.mouseY`, `coop.mouseDown`, `coop.clicked`, `coop.mouse.clicker`, `coop.mouse.hovered` | shared | `Coop.mouse` | [Input](input.md), [The mouse](mouse.md) |
+| `coop.mouse`, `coop.hover`, `coop.mouse.cursors` | shared / picture only | `Coop.mouse` | [The mouse](mouse.md) |
+| `coop.zone` | shared | `Coop.zones` | [The mouse](mouse.md) |
+| `coop.only`, `coop.shared` | shared | `Coop.screens` | [Private screens](mouse.md#private-screens) |
+| `coop.camera` | picture only | `Coop.camera` | [Camera, HUD, labels](picture.md) |
+| `coop.hud`, `coop.label` | picture only | `Coop.view` | [Camera, HUD, labels](picture.md) |
+| `coop.version`, `coop.has`, `coop.option`, `coop.options`, `coop.events` | shared | `Coop.room` | [Players](players.md), [Host settings](host-settings.md), [Events](events.md) |
+
+`coop.mouse.clicker`, `coop.mouse.hovered`, `coop.mouse(slot, mode)` and `coop.mouse.cursors` are new in the next
+release (after 1.0.3.9).
 
 Many features need no call at all: see [What every game gets](automatic.md).

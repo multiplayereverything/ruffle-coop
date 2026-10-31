@@ -3,12 +3,13 @@
 This walks through adding a second player to a single-player AS3 game: a hero that moves with the arrows. The
 same steps work in AS2 with the AS2 library.
 
-## 1. Add the helper library
+## 1. Add the Coop library
 
-Copy `RuffleTogether.as` from
-[`tools/coop-api/as3/`](https://github.com/multiplayereverything/ruffle-together/tree/coop/tools/coop-api/as3) (or
-`as2/` for AS2) next to your code. Every call is safe outside Ruffle Together: it answers like a single-player game
-(1 player, slot 0), so your SWF still works in Flash Player and plain Ruffle.
+Copy every `Coop*.as` file from
+[`tools/coop-api/as3/`](https://github.com/multiplayereverything/ruffle-together/tree/coop/tools/coop-api/as3) next
+to your code (for AS2, `#include "Coop.as"` from `as2/`). Every call is safe outside Ruffle Together: it answers like
+a single-player game (1 player, slot 0), so your SWF still works in Flash Player and plain Ruffle. See
+[The Coop library](../api/library.md).
 
 ## 2. One hero per player
 
@@ -16,7 +17,7 @@ Make a hero for every player, and move each one from **that player's buttons** i
 
 ```actionscript
 var heroes:Array = [];
-for (var slot:int = 0; slot < RuffleTogether.players(); slot++) {
+for (var slot:int = 0; slot < Coop.players.count(); slot++) {
     var hero:Hero = new Hero();
     hero.x = 100 + slot * 60;
     addChild(hero);
@@ -25,7 +26,7 @@ for (var slot:int = 0; slot < RuffleTogether.players(); slot++) {
 
 addEventListener(Event.ENTER_FRAME, function (e:Event):void {
     for (var slot:int = 0; slot < heroes.length; slot++) {
-        var held:int = RuffleTogether.buttons(slot);
+        var held:int = Coop.input.buttons(slot);
         if (held & 4) heroes[slot].x -= 5;   // LEFT
         if (held & 8) heroes[slot].x += 5;   // RIGHT
         if (held & 16) heroes[slot].jump();  // FIRE
@@ -42,7 +43,7 @@ The key map says which keys a player presses for each button. A game can set its
 `--coop-keys`:
 
 ```actionscript
-RuffleTogether.keys(
+Coop.input.setKeys(
     "slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=32\n" +
     "slot 1: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=32\n" +
     "local: UP=38,87 DOWN=40,83 LEFT=37,65 RIGHT=39,68 FIRE=32,90");
@@ -55,16 +56,16 @@ If the level is bigger than the screen, give each player their own camera instea
 
 ```actionscript
 for (var slot:int = 0; slot < heroes.length; slot++) {
-    RuffleTogether.camera(slot, heroes[slot].x, heroes[slot].y, 1);
+    Coop.camera.setPosition(slot, heroes[slot].x, heroes[slot].y);
 }
-RuffleTogether.hud("_root.hud");   // the score bar stays on screen
+Coop.view.pinHud("_root.hud");   // the score bar stays on screen
 ```
 
 ## 5. Names over the heroes
 
 ```actionscript
 for (var slot:int = 0; slot < heroes.length; slot++) {
-    RuffleTogether.label(slot, "_root.hero" + slot, RuffleTogether.name(slot));
+    Coop.view.label(slot, "_root.hero" + slot, Coop.players.name(slot));
 }
 ```
 

@@ -60,24 +60,33 @@ the chat unless the key map gives it to the game.
 
 ## The mouse
 
-Flash has one mouse, so by default only the host clicks. A key map can change that without touching the SWF:
+By default only the host's mouse is in the game. A key map can let friends' mice in without touching the SWF:
 
 ```text
 mouse: zones
+mouse 2: host
 zone 1: _root.players.p2
 private: _root.pcb opened-by _root.players.*.instance*
-hover: host
+hover: own
+cursors: auto
 ```
 
 | Line | What it does |
 |---|---|
-| `mouse: host` | Only the host clicks (the default) |
-| `mouse: buttons` | Friends click too, but only on things the game made clickable (what shows the hand cursor) |
-| `mouse: zones` | A friend clicks only inside their own zone; the host clicks everything else |
-| `mouse: all` | Everyone clicks anywhere |
+| `mouse: host` | Only the host's mouse is in the game (the default) |
+| `mouse: buttons` | Friends' mice too, but only on things the game made clickable (what shows the hand cursor) |
+| `mouse: zones` | A friend's mouse only on clickable things inside their own zone; the host's everywhere else |
+| `mouse: all` | Everyone's mouse, anywhere |
+| `mouse N: <mode>` | The same for one friend (N is 1 to 3), over what `mouse:` says. Next release |
 | `zone N: <clip>` | The buttons inside that clip belong to player N, for example their card on a character screen. Only while the clip is on show |
 | `private: <clip> opened-by <pattern>` | A pop-up belongs to the player who opened it: only they see and click it. While it's someone's, nobody else may click the buttons that open it |
-| `hover: host`, `own`, `off` | How hover looks while friends click (see [`coop.hover`](../api/mouse.md)) |
+| `hover: own`, `shared` | How each screen draws the game's buttons: by its own player's mouse (the default) or as the game has them. See [`coop.hover`](../api/mouse.md#how-buttons-look) |
+| `cursors: auto`, `on`, `off` | When friends' cursors show. Next release |
+
+:::{dropdown} In 1.0.3.9
+`hover:` took `host` (the default), `own` or `off`, and there was no `mouse N:` or `cursors:`. In the next release
+`hover: host` means `shared`, and `hover: off` is gone.
+:::
 
 To find a button's path for a zone, start with `mouse: buttons` and click it once. The log
 (`%LOCALAPPDATA%\ruffle\log\ruffle.log`) says, for example, `player 2 clicks _root.players.p2.b10 (463, 272)`.
