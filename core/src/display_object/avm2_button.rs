@@ -567,7 +567,15 @@ impl<'gc> TDisplayObject<'gc> for Avm2Button<'gc> {
     }
 
     fn render_self(self, context: &mut RenderContext<'_, 'gc>) {
-        let current_state = self.get_state_child(self.0.state.get().into());
+        let mut state = self.0.state.get();
+        // Ruffle Together: this PC draws the button as its own player's mouse sees it
+        if !context.is_offscreen
+            && let Some(own) = context.stage.coop_button_state(self.into())
+            && self.get_state_child(own.into()).is_some()
+        {
+            state = own;
+        }
+        let current_state = self.get_state_child(state.into());
 
         if let Some(state) = current_state {
             state.pre_render(context);

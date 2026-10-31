@@ -1,6 +1,6 @@
 /**
  * Ruffle Together co-op API for AS2 games (any SWF version, including 6 and 7).
- * Full reference: docs/coop-api.md in the ruffle-coop repository.
+ * The older flat helper: new code uses the grouped library (Coop.as). Full reference: docs/coop-api.md.
  *
  * Every call is safe outside Ruffle Together (plain Flash Player or plain Ruffle): active() is false,
  * players() is 1, localSlot() is 0, mouse calls read the normal mouse, and camera, HUD, label and
@@ -81,7 +81,7 @@ class RuffleTogether {
     /** A private screen, and while it is someone's nobody else may click the buttons that open it ("_root.players.*.instance*"). */
     public static function onlyOpenedBy(path:String, pattern:String):Boolean { return send("coop.only", path, pattern) == true; }
 
-    /** Where the game's mouse rests between clicks while friends may click: "off" (no hover for anyone) or "host". */
+    /** How each screen draws Button symbols while friends have mice: "own" (the default) or "shared". */
     public static function hover(mode:String):Boolean { return send("coop.hover", mode) == true; }
 
     /** Everyone sees and clicks the clip at path again. */

@@ -5,7 +5,7 @@ build in real windows. Run it after any change to the co-op API or the session, 
 
 | File | What it is |
 |---|---|
-| `CoopDemo.as`, `CoopDemo.swf` | The demo (uses `../as3/RuffleTogether.as`) |
+| `CoopDemo.as`, `CoopDemo.swf` | The demo (uses the library, `../as3/Coop*.as`) |
 | `demo.keys` | Its starting key map (arrows move, Space fires, 1 key maps, 3 camera) |
 | `demo-2p.txt` | A 2-player input script, about 50 s |
 | `demo-2p-windows.txt` | The same three times after a 5 s wait, for watching real windows |
@@ -34,7 +34,7 @@ Gameplay reads only shared answers; `localSlot`, `isHost` and `ping` only reach 
 ```bash
 java -cp ../../asc/asc.jar macromedia.asc.embedding.Main -AS3 -strict \
   -import ../../../target/release/build/ruffle_core-*/out/playerglobal_import.abc \
-  -in ../as3/RuffleTogether.as -swf CoopDemo,800,600,30 CoopDemo.as
+  -in ../as3/Coop.as -in ../as3/CoopPlayers.as -in ../as3/CoopInput.as -in ../as3/CoopMouse.as   -in ../as3/CoopZones.as -in ../as3/CoopScreens.as -in ../as3/CoopCamera.as -in ../as3/CoopView.as   -in ../as3/CoopRoom.as -swf CoopDemo,800,600,30 CoopDemo.as
 ```
 
 (Any `playerglobal_import.abc` from a release build of `ruffle_core` works; delete the `.abc` it leaves.)

@@ -21,12 +21,13 @@ player's PC runs the same Flash game and only inputs travel. Work happens on bra
 |---|---|
 | Co-op API answers | `desktop/src/coop/api.rs` |
 | One frame from every player's input | `desktop/src/coop/frame.rs` (`Stepper`) |
+| Every player's mouse (rules, clicks, cursors, debug overlay) | `desktop/src/coop/mice.rs`; one mouse per player in the core: `core/src/coop_mice.rs` |
 | Network session (handshake, inputs, leave, chat, pings) | `desktop/src/coop/session.rs`, `protocol.rs`, `net.rs`, `lockstep.rs` |
 | Key maps | `desktop/src/coop/keymap.rs`, `desktop/src/coop/keys/*.keys` |
 | Camera, HUD, frame clock, fingerprint (core) | `core/src/coop_view.rs`, `core/src/frame_clock.rs`, `core/src/coop_fingerprint.rs` |
 | Window overlays (labels, notices, chat, lobby) | `desktop/src/gui.rs` |
 | Discord presence | `desktop/src/coop/discord.rs` |
-| Game-side helper library | `tools/coop-api/as2/RuffleTogether.as`, `tools/coop-api/as3/RuffleTogether.as` |
+| Game-side library | `tools/coop-api/as3/Coop*.as` (one class per group), `tools/coop-api/as2/Coop.as` (`#include`); the older flat `RuffleTogether.as` |
 | Labs | `tools/coop-lab/lab.py` (headless players), `tools/coop-lab/windows_lab.py` (two real windows) |
 | API demo (every `coop.*` call on screen) | `tools/coop-api/demo/` ([README](tools/coop-api/demo/README.md)) |
 
@@ -40,6 +41,9 @@ player's PC runs the same Flash game and only inputs travel. Work happens on bra
   GM2 4 players 3300 frames `8e30f66c`, TW 2 players 3000 frames `ad6fe22d` (see HANDOFF.md for the files).
 - After any change to the co-op API or the session, run the API demo ([tools/coop-api/demo/README.md](tools/coop-api/demo/README.md)):
   replay twice, two headless players through the relay, then two real windows. Add every new call to it.
+- The game-side library (`tools/coop-api/as2`, `as3`, grouped as `Coop.camera.setPosition(...)`) is how people
+  use the API in their own code: every new call gets a method there, in AS2 and AS3. Ruffle's existing call
+  names stay unchanged for released mods; new calls get grouped names (`"coop.mouse.hovered"`).
 - `target\release\ruffle_desktop.exe` is often locked by other sessions' labs: use
   `target\release\deps\ruffle_desktop.exe`.
 - Ask the user before pushing, releasing, changing mods-info or the relay. Never drive the real keyboard or

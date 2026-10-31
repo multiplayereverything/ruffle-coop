@@ -377,3 +377,23 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   846PM): every window logged Red f270, Blue f271, Green f272, player 4 refused on Bob's switch, Bob's switch ON.
   156/156, replays BIC/GM2/TW unchanged, Chaos Faction 2 replay unchanged (18b022a3). Seen: a name tag of a dot out
   of view is drawn outside the game area in a small window (picture only).
+- One mouse per player (user: "proper multiple mouses ... proper hovering with the original hovering effects";
+  plan in multi-mouse-plan.md). Ruffle's core keeps every player's mouse (`core/src/coop_mice.rs`): position,
+  hovered, pressed, button; each player's events run with their mouse swapped in, so Ruffle's own hover, press,
+  release and drag code runs for each. An object rolls over for the first mouse on it and out for the last;
+  `_xmouse` / `stage.mouseX` in a handler is that player's; `startDrag` follows the mouse that started it. The
+  borrowed mouse, the click queue, the hold limit, parking and `hover: off` are gone: several players press and
+  hold at once. Rules (`desktop/src/coop/mice.rs`, moved out of frame.rs): a friend's mouse is in the stage only
+  where their mode allows (`mouse:`, new `mouse N:` / `coop.mouse(slot, mode)`), zones and private screens as
+  before. `hover: own` (new default): each PC draws Button symbols by its own player's mouse in the game's real
+  Up/Over/Down art (AS3 SimpleButton states; AS2 art copied without scripts, clips shared by the states drawn
+  live); `shared` (old `host`) as the game has them. New: `coop.mouse.clicker`, `coop.mouse.hovered(slot)`,
+  `coop.mouse.cursors` / `cursors:`, idle friends' cursors fade after 3 s, `--coop-mouse-debug` overlay.
+  Grouped game-side library `tools/coop-api/as3/Coop*.as` and `as2/Coop.as` (`Coop.camera.setPosition(...)`);
+  groups are made on first use (made at class load, asc's file order broke it: error #1007). API demo moved to it.
+  New test SWF desktop/tests/coop/mice (hover counting, clicker, drag, a SimpleButton). Tests 161/161 (+5 new),
+  replays BIC/GM2/TW unchanged; picture test: host's PC draws the button Up, player 2's Over, same fingerprint.
+  API demo replays identical twice (2p 3fa99a8d, 4p 10073f2d), 4 headless on the relay room LN39R desync_at=none
+  (a first try hung before the start, the relay's), 4 real windows room NM65M: identical logs, the three friends'
+  presses on the same frame 270 (was 270/271/272), `by P2/P3/P4`, player 4 refused on Bob's switch. Chaos Faction 2
+  replay identical twice (67a7e305; was 18b022a3: friends now have mice).

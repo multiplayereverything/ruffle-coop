@@ -2,7 +2,7 @@
 # In a session the mod pins the game's own key variables to these codes (src/cf2.as), so the game's
 # solo and 2-player key sets and any rebinding in Settings don't matter.
 # FIRE = punch, ALT = kick, KEY1 = taunt, KEY2 = drop weapon, KEY3 = hold to punch while holding a weapon,
-# MENU = pause (host only).
+# MENU = the game's own pause (host only).
 slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32
 slot 1: UP=104 DOWN=101 LEFT=100 RIGHT=102 FIRE=97 ALT=98 KEY1=105 KEY2=99 KEY3=96
 local: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88 KEY1=84 KEY2=68 KEY3=16 MENU=32
@@ -16,6 +16,7 @@ zone 0: _root.players.p2.combo
 # it; everyone else's mouse goes through it. The game has one editor, so while it is open nobody else's Edit
 # Player button works (they see "... has that open").
 private: _root.pcb opened-by _root.players.*.instance*
-# The game's own highlights (the yellow arrows, the glow) follow the host's mouse, on every screen: they
-# are made by the game's code, so they can't be per player.
-hover: host
+# Every player has their own mouse on the character screen, so each player's own hover lights up their
+# own card (each screen draws buttons by its own player's mouse; highlights made by the game's code show
+# on every screen).
+hover: own

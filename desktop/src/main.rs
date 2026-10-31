@@ -244,6 +244,7 @@ fn main() -> Result<(), Error> {
                 ..Default::default()
             }))
         });
+        coop::set_mouse_debug(coop.coop_mouse_debug);
         let opts = coop::session::SessionOpts {
             role,
             name: coop.coop_name.clone(),

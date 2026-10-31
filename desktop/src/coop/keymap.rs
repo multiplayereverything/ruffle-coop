@@ -9,17 +9,18 @@
 //! slot 0: UP=38 DOWN=40 LEFT=37 RIGHT=39 FIRE=90 ALT=88
 //! slot 1: UP=87 DOWN=83 LEFT=65 RIGHT=68 FIRE=84 ALT=89
 //! local: UP=38,87 DOWN=40,83 FIRE=90,84     keys a player presses on their own PC, per button
-//! mouse: buttons                            who may click: host (the default), zones (friends only
-//!                                           in their own zone), buttons (friends on what the game
-//!                                           made clickable), all
+//! mouse: buttons                            friends' mice: host (off, the default), zones (only in
+//!                                           their own zone), buttons (on what the game made
+//!                                           clickable), all
+//! mouse 2: all                              one player's mouse (overrides `mouse:` for them)
 //! zone 1: _root.players.p2                  only player 2 may click the buttons in this clip (only
 //!                                           while it is on show; the most exact clip wins)
 //! zone 1: 290,95 200x190                    or in this box (stage pixels, on every screen)
 //! private: _root.pcb                        a pop-up only the player who opened it sees and clicks;
 //!   opened-by _root.players.*.instance*     ... and nobody else opens it while it is theirs
-//! hover: host                               the game's own hover follows the host's mouse, on every
-//!                                           screen (the default); own: Button symbols' own Over art
-//!                                           follows each player's mouse on their screen; off: none
+//! hover: own                                each screen draws Button symbols as its own player's
+//!                                           mouse sees them (the default); shared: as the game has them
+//! cursors: auto                             friends' cursors: where they may click (the default), on, off
 //! ```
 
 use crate::coop::lockstep::{MAX_PLAYERS, button_named};
@@ -62,26 +63,48 @@ pub struct Game {
     /// Clips that are private screens (`private:`), with the buttons that open them.
     privates: Vec<(String, Option<String>)>,
     hover: Option<Hover>,
+    /// `mouse N:` lines.
+    mouse_modes: Vec<(u8, MouseMode)>,
+    cursors: Option<Cursors>,
 }
 
-/// How hover works while friends may click (`hover:` in a key map, or the game's `coop.hover`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How each screen draws Button symbols while friends have mice (`hover:`, or `coop.hover`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Hover {
-    /// The game's mouse follows the host's, and each PC draws Button symbols in the game's own
-    /// Up/Over art by its own player's mouse (the picture only).
+    /// As this PC's player's mouse sees them, in the game's own Up/Over/Down art (the picture
+    /// only).
+    #[default]
     Own,
-    /// The game's mouse follows the host's: the game's own hover, the host's, on every screen
-    /// (the default).
-    Host,
-    /// The game's mouse rests off the stage: no hover anywhere.
-    Off,
+    /// As the game has them: every player's hover on every screen.
+    Shared,
 }
 
 impl Hover {
     pub fn named(name: &str) -> Option<Self> {
         match name {
             "own" => Some(Self::Own),
-            "host" => Some(Self::Host),
+            // `host` was its name before every player had a mouse
+            "shared" | "host" => Some(Self::Shared),
+            _ => None,
+        }
+    }
+}
+
+/// Which friends' cursors each screen shows (`cursors:`, or `coop.mouse.cursors`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cursors {
+    /// Only while one is over something that player may click.
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+impl Cursors {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "auto" => Some(Self::Auto),
+            "on" => Some(Self::On),
             "off" => Some(Self::Off),
             _ => None,
         }
@@ -109,20 +132,19 @@ pub fn path_fits(target: &str, pattern: &str) -> bool {
     }
 }
 
-/// Who may click the game (`mouse:` in a key map, or the game's `coop.mouse`).
+/// Where a friend's mouse is in the game (`mouse:` in a key map, or the game's `coop.mouse`).
+/// Elsewhere it is outside the stage: it neither hovers nor clicks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MouseMode {
-    /// Only the host's mouse reaches the game (every PC still knows every player's mouse).
+    /// Nowhere: only the host's mouse is in the game (every PC still knows every player's mouse).
     #[default]
     Host,
-    /// A friend's clicks only inside their own zone (and on something clickable there): a
-    /// character screen where each player picks on their own card. The host clicks everywhere
-    /// but other players' zones.
+    /// On something clickable inside their own zone: their own card on a character screen. The
+    /// host's mouse is everywhere but other players' zones.
     Zones,
-    /// Every player's clicks, but a friend's only on something the game made clickable (what
-    /// shows the hand cursor).
+    /// On something the game made clickable (what shows the hand cursor).
     Buttons,
-    /// Every player's clicks, anywhere.
+    /// Anywhere.
     All,
 }
 
@@ -243,6 +265,8 @@ impl Game {
             zones: vec![],
             privates: vec![],
             hover: None,
+            mouse_modes: vec![],
+            cursors: None,
         };
         for (number, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
@@ -271,6 +295,16 @@ impl Game {
                 game.shared = true;
             } else if let Some(mode) = line.strip_prefix("mouse:") {
                 game.mouse = MouseMode::named(mode.trim()).map(Some).ok_or_else(|| fail(format!("mouse is host, zones, buttons or all: {mode}")))?;
+            } else if let Some(rest) = line.strip_prefix("mouse ") {
+                let one = (|| {
+                    let (slot, mode) = rest.split_once(':')?;
+                    let slot = slot.trim().parse::<u8>().ok().filter(|&s| s > 0 && (s as usize) < MAX_PLAYERS)?;
+                    Some((slot, MouseMode::named(mode.trim())?))
+                })()
+                .ok_or_else(|| fail("expected mouse N: host, zones, buttons or all (N is 1 to 3)".into()))?;
+                game.mouse_modes.push(one);
+            } else if let Some(cursors) = line.strip_prefix("cursors:") {
+                game.cursors = Some(Cursors::named(cursors.trim()).ok_or_else(|| fail(format!("cursors is auto, on or off: {cursors}")))?);
             } else if let Some(rest) = line.strip_prefix("zone ") {
                 let zone = (|| {
                     let (slot, rest) = rest.split_once(':')?;
@@ -290,7 +324,7 @@ impl Game {
                 }
                 game.privates.push((path.to_string(), openers.map(str::to_string)));
             } else if let Some(hover) = line.strip_prefix("hover:") {
-                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is own, host or off: {hover}")))?);
+                game.hover = Some(Hover::named(hover.trim()).ok_or_else(|| fail(format!("hover is own or shared: {hover}")))?);
             } else if let Some(list) = line.strip_prefix("local:") {
                 for (button, codes) in pairs(list)? {
                     game.local.extend(codes.into_iter().map(|code| (code, button)));
@@ -351,6 +385,8 @@ impl Game {
             zones: self.zones.clone(),
             privates: self.privates.clone(),
             hover: self.hover,
+            mouse_modes: self.mouse_modes.clone(),
+            cursors: self.cursors,
         }
     }
 
@@ -441,14 +477,16 @@ pub struct GameKeys {
     held: Vec<u16>,
     /// Every slot presses the same keys (a hot-seat game): a key is down while any player holds it.
     shared: bool,
-    /// Who may click, and the boxes only one player may click (the map's `mouse:` and `zone`;
-    /// None and no boxes when it says nothing, so a game's own `coop.keys` map keeps the rules).
+    /// Where friends' mice are in the game, and the clips and boxes only one player may click
+    /// (the map's `mouse:`, `mouse N:` and `zone`; nothing when it says nothing, so a game's own
+    /// `coop.keys` map keeps the rules).
     pub mouse: Option<MouseMode>,
+    pub mouse_modes: Vec<(u8, MouseMode)>,
     pub zones: Vec<Zone>,
     /// The map's private screens (`private:`), with the buttons that open them.
     pub privates: Vec<(String, Option<String>)>,
-    /// Where the game's mouse rests between clicks (`hover:`), if the map says.
     pub hover: Option<Hover>,
+    pub cursors: Option<Cursors>,
 }
 
 impl GameKeys {
@@ -520,9 +558,14 @@ zone 1: 290,95 200x190").expect("map");
         assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.players.p20")), "not a clip inside it");
         assert!(Zone::allows(&clips, 0, 0, 0, Some("_root.startbutton")) && !Zone::is_own(&clips, 1, 0, 0, Some("_root.startbutton")));
         assert!(Zone::allows(&clips, 0, 0, 0, None), "nothing clicked there");
-        let private = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb\nhover: host").expect("map").keys();
+        let private = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb\nhover: shared").expect("map").keys();
         assert_eq!(private.privates, [("_root.pcb".to_string(), None)]);
-        assert_eq!(private.hover, Some(Hover::Host));
+        assert_eq!(private.hover, Some(Hover::Shared));
+        let one = Game::parse("t", "slot 0: FIRE=32\nmouse 2: all\ncursors: off\nhover: own").expect("map").keys();
+        assert_eq!(one.mouse_modes, [(2, MouseMode::All)]);
+        assert_eq!((one.cursors, one.hover), (Some(Cursors::Off), Some(Hover::Own)));
+        assert!(Game::parse("t", "slot 0: FIRE=32\nmouse 0: all").is_err(), "the host's mouse is always on");
+        assert!(Game::parse("t", "slot 0: FIRE=32\ncursors: some").is_err());
         let opened = Game::parse("t", "slot 0: FIRE=32\nprivate: _root.pcb opened-by _root.players.*.instance*").expect("map");
         assert_eq!(opened.keys().privates, [("_root.pcb".to_string(), Some("_root.players.*.instance*".to_string()))]);
         assert!(Game::parse("t", "slot 0: FIRE=32\nprivate:").is_err());

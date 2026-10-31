@@ -145,6 +145,9 @@ pub struct MouseData<'gc> {
     /// while the drag is still active; this flag makes the nested call a
     /// no-op instead of recursing until stack overflow.
     pub updating_drop_target: bool,
+
+    /// Ruffle Together: the other players' mice.
+    pub coop: crate::coop_mice::Pointers<'gc>,
 }
 
 impl<'gc> MouseData<'gc> {
@@ -382,6 +385,11 @@ pub struct Player {
     /// The current mouse cursor icon.
     mouse_cursor: MouseCursor,
     mouse_cursor_needs_check: bool,
+
+    /// Ruffle Together: this PC's player, and per player the private screens their mouse goes
+    /// through (other players' open ones).
+    coop_local: u8,
+    coop_hidden: [Vec<String>; crate::coop_mice::MAX_POINTERS],
 
     system: SystemProperties,
 
@@ -1081,48 +1089,203 @@ impl Player {
         self.mutate_with_update_context(|context| crate::coop_view::set_pickable(context, path, pickable))
     }
 
-    /// Ruffle Together: each player's own hover, on this PC only (the picture; the game's buttons
-    /// don't change). With `on`, Button symbols are drawn as this PC's player's mouse at `at`
-    /// (stage twips) sees them: the one under it in its Over art, the rest in Up art, whatever the
-    /// host's mouse does to the game. Only the game's own art: a button whose art can't be copied
-    /// that way, and hover made by the game's code, are drawn as the game has them.
-    pub fn coop_set_own_hover(&mut self, on: bool, at: Option<(i32, i32)>) {
-        let saved = self.mouse_position;
-        if let Some((x, y)) = at {
-            self.mouse_position = Point::new(Twips::new(x), Twips::new(y));
+    /// Ruffle Together: this PC's player (slot), whose cursor and button states this PC shows.
+    pub fn set_coop_local(&mut self, slot: u8) {
+        self.coop_local = slot;
+    }
+
+    /// Ruffle Together: the private screens player `slot`'s mouse goes through (other players'
+    /// open ones).
+    pub fn set_coop_hidden(&mut self, slot: u8, paths: Vec<String>) {
+        if let Some(hidden) = self.coop_hidden.get_mut(slot as usize) {
+            *hidden = paths;
         }
+    }
+
+    /// Ruffle Together: whether player `slot` has a mouse in the game (player 1 always does).
+    pub fn coop_has_pointer(&mut self, slot: u8) -> bool {
         self.mutate_with_update_context(|context| {
-            context.stage.set_coop_own_hover(on);
-            if let Some(previous) = context.stage.coop_hovered() {
-                previous.base().set_coop_show_over(false);
-                context.stage.set_coop_hovered(context.gc(), None);
+            let coop = &context.mouse_data.coop;
+            slot == 0 || coop.active == slot || coop.stored.get(slot as usize).is_some_and(Option::is_some)
+        })
+    }
+
+    fn coop_pointers_on(&mut self) -> bool {
+        self.mutate_with_update_context(|context| context.mouse_data.coop.on)
+    }
+
+    /// The players whose mice the frame updates, player 1 first; only the active one while another
+    /// player's events run.
+    fn coop_pointer_slots(&mut self) -> Vec<u8> {
+        self.mutate_with_update_context(|context| {
+            let coop = &context.mouse_data.coop;
+            if coop.active != 0 {
+                return vec![coop.active];
             }
-            if !on {
-                return;
+            let others = (1..crate::coop_mice::MAX_POINTERS as u8).filter(|&slot| coop.stored[slot as usize].is_some());
+            std::iter::once(0).chain(others).collect()
+        })
+    }
+
+    /// Ruffle Together: gives player `slot` (not player 1) a mouse of their own in the game, outside
+    /// the stage until it moves in, or takes it away after letting go of what it held and hovered.
+    pub fn coop_set_pointer(&mut self, slot: u8, on: bool) {
+        if slot == 0 || slot as usize >= crate::coop_mice::MAX_POINTERS || self.coop_has_pointer(slot) == on {
+            return;
+        }
+        if on {
+            self.mutate_with_update_context(|context| {
+                let coop = &mut context.mouse_data.coop;
+                coop.stored[slot as usize] = Some(Default::default());
+                coop.on = true;
+            });
+            return;
+        }
+        self.coop_with_pointer(slot, |player| {
+            if player.input.is_mouse_down(MouseButton::Left) {
+                let (x, y) = player.mouse_position_twips();
+                let (x, y) = player.stage_to_viewport(x, y);
+                player.handle_event(PlayerEvent::MouseUp { x, y, button: MouseButton::Left });
             }
-            // the button the game's mouse (the host's) hovers is drawn Up here unless it is ours
-            if let Some(hovered) = context.mouse_data.hovered
-                && let Some(button) = hovered.as_displayobject().as_avm1_button()
-            {
-                button.coop_picture(context, crate::display_object::ButtonState::Up);
-            }
-            if at.is_none() {
-                return;
-            }
-            let Some(object) = run_mouse_pick(context, true).filter(|object| object.mouse_cursor(context) == MouseCursor::Hand)
-            else {
-                return;
-            };
-            let display = object.as_displayobject();
-            if let Some(button) = display.as_avm1_button()
-                && (button.coop_picture(context, crate::display_object::ButtonState::Over)
-                    || button.coop_state() != crate::display_object::ButtonState::Up)
-            {
-                display.base().set_coop_show_over(true);
-                context.stage.set_coop_hovered(context.gc(), Some(display));
+            player.coop_pointer_leave();
+        });
+        self.mutate_with_update_context(|context| {
+            let coop = &mut context.mouse_data.coop;
+            coop.stored[slot as usize] = None;
+            coop.on = coop.stored.iter().any(Option::is_some);
+        });
+    }
+
+    /// Ruffle Together: the active player's mouse leaves the game: it rolls out of what it was on.
+    pub fn coop_pointer_leave(&mut self) {
+        if !self.mouse_in_stage {
+            return;
+        }
+        self.mouse_in_stage = false;
+        if self.update_mouse_state(EnumSet::empty(), true, &mut false) {
+            self.needs_render = true;
+        }
+    }
+
+    /// Ruffle Together: runs `f` as player `slot`: with their mouse as Ruffle's own (if they have
+    /// one), and other players' private screens out of their mouse's way.
+    pub fn coop_with_pointer<R>(&mut self, slot: u8, f: impl FnOnce(&mut Self) -> R) -> R {
+        let paths = self.coop_hidden.get(slot as usize).cloned().unwrap_or_default();
+        let hidden: Vec<(String, bool)> = paths
+            .into_iter()
+            .filter_map(|path| {
+                let was = self.mutate_with_update_context(|context| crate::coop_view::set_pickable(context, &path, false))?;
+                Some((path, was))
+            })
+            .collect();
+        let previous = self.mutate_with_update_context(|context| context.mouse_data.coop.active);
+        let swapped = slot != previous && self.coop_swap(slot);
+        let dragging = self.mutate_with_update_context(|context| context.drag_object.is_some());
+        let result = f(self);
+        self.mutate_with_update_context(|context| {
+            if !dragging && context.drag_object.is_some() {
+                context.mouse_data.coop.drag_owner = Some(slot);
             }
         });
-        self.mouse_position = saved;
+        if swapped {
+            self.coop_swap(previous);
+        }
+        for (path, was) in hidden.into_iter().rev() {
+            self.mutate_with_update_context(|context| crate::coop_view::set_pickable(context, &path, was));
+        }
+        result
+    }
+
+    /// Makes player `slot`'s mouse Ruffle's own, keeping the active player's for later; false if
+    /// `slot` has no mouse in the game.
+    fn coop_swap(&mut self, slot: u8) -> bool {
+        let position = self.mouse_position;
+        let stage_override = self.stage_mouse_override;
+        let in_stage = self.mouse_in_stage;
+        let down = self.input.is_mouse_down(MouseButton::Left);
+        let cursor = self.mouse_cursor;
+        let cursor_needs_check = self.mouse_cursor_needs_check;
+        let loaded = self.mutate_with_update_context(|context| {
+            let data = &mut *context.mouse_data;
+            let stored = data.coop.stored.get_mut(slot as usize)?.take()?;
+            let active = data.coop.active as usize;
+            data.coop.stored[active] = Some(crate::coop_mice::Pointer {
+                position,
+                stage_override,
+                in_stage,
+                hovered: data.hovered,
+                pressed: data.pressed,
+                down,
+                cursor,
+                cursor_needs_check,
+            });
+            data.hovered = stored.hovered;
+            data.pressed = stored.pressed;
+            data.coop.active = slot;
+            Some((stored.position, stored.stage_override, stored.in_stage, stored.down, stored.cursor, stored.cursor_needs_check))
+        });
+        let Some((position, stage_override, in_stage, down, cursor, cursor_needs_check)) = loaded else {
+            return false;
+        };
+        self.mouse_position = position;
+        self.stage_mouse_override = stage_override;
+        self.mouse_in_stage = in_stage;
+        self.input.coop_set_mouse_down(MouseButton::Left, down);
+        self.mouse_cursor = cursor;
+        self.mouse_cursor_needs_check = cursor_needs_check;
+        true
+    }
+
+    /// Ruffle Together: the path of what player `slot`'s mouse is on, the same on every PC.
+    pub fn coop_hovered_path(&mut self, slot: u8) -> Option<String> {
+        self.mutate_with_update_context(|context| {
+            let coop = &context.mouse_data.coop;
+            let hovered = if coop.active == slot {
+                context.mouse_data.hovered
+            } else {
+                coop.stored.get(slot as usize)?.as_ref()?.hovered
+            }?;
+            Some(crate::coop_view::path_of(context, hovered.as_displayobject()))
+        })
+    }
+
+    /// Ruffle Together: what this PC draws for the mice (the picture only; the game's buttons don't
+    /// change). With `own`, Button symbols are drawn as this PC's player's mouse sees them: Over
+    /// under it, Down while it presses one, Up otherwise. Also shows this PC's player's cursor.
+    pub fn coop_set_view(&mut self, own: bool) {
+        let local = self.coop_local;
+        let active_cursor = self.mouse_cursor;
+        let cursor = self.mutate_with_update_context(|context| {
+            let coop = &context.mouse_data.coop;
+            let mine = if coop.active == local {
+                Some((context.mouse_data.hovered, context.mouse_data.pressed, active_cursor))
+            } else {
+                coop.stored.get(local as usize).copied().flatten().map(|p| (p.hovered, p.pressed, p.cursor))
+            };
+            let on = coop.on;
+            // every hovered or pressed button may need another state's art on this PC
+            let touched: Vec<_> = std::iter::once((context.mouse_data.hovered, context.mouse_data.pressed))
+                .chain(coop.stored.iter().flatten().map(|p| (p.hovered, p.pressed)))
+                .flat_map(|(hovered, pressed)| [hovered, pressed])
+                .flatten()
+                .collect();
+            let own = own && on && mine.is_some();
+            context.stage.set_coop_own_hover(own);
+            let (hovered, pressed, cursor) = mine.unwrap_or((None, None, active_cursor));
+            let view = (hovered.map(|o| o.as_displayobject()), pressed.map(|o| o.as_displayobject()));
+            context.stage.set_coop_view(context.gc(), view);
+            if own {
+                for object in touched {
+                    if let Some(button) = object.as_displayobject().as_avm1_button() {
+                        button.coop_prepare(context);
+                    }
+                }
+            }
+            on.then_some(cursor)
+        });
+        if let Some(cursor) = cursor {
+            self.ui.set_mouse_cursor(cursor);
+        }
     }
 
     /// Ruffle Together: the window position of a stage point (the inverse of `viewport_to_stage`).
@@ -1706,6 +1869,12 @@ impl Player {
             // Prevent stack overflow.
             return;
         }
+        let coop = &mut context.mouse_data.coop;
+        if context.drag_object.is_none() {
+            coop.drag_owner = None;
+        } else if coop.drag_owner.unwrap_or(0) != coop.active {
+            return;
+        }
         let mouse_position = *context.mouse_position;
         if let Some(drag_object) = context.drag_object {
             let display_object = drag_object.display_object;
@@ -2096,6 +2265,15 @@ impl Player {
                 }
             }
 
+            // Ruffle Together: with several mice, an object rolls over for the first mouse on it and
+            // out for the last one
+            if context.mouse_data.coop.on {
+                let coop = &context.mouse_data.coop;
+                events.retain(|(object, event)| {
+                    !matches!(event, ClipEvent::RollOver { .. } | ClipEvent::RollOut { .. }) || !coop.shared_hover(*object)
+                });
+            }
+
             // Fire any pending mouse events.
             let needs_render = if events.is_empty() {
                 false
@@ -2143,7 +2321,10 @@ impl Player {
         // Update mouse cursor if it has changed.
         if new_cursor != self.mouse_cursor {
             self.mouse_cursor = new_cursor;
-            self.ui.set_mouse_cursor(new_cursor)
+            // Ruffle Together: with several mice, `coop_set_view` shows this PC's player's cursor
+            if !self.coop_pointers_on() {
+                self.ui.set_mouse_cursor(new_cursor)
+            }
         }
         self.mouse_cursor_needs_check = mouse_cursor_needs_check;
 
@@ -2646,10 +2827,14 @@ impl Player {
         });
 
         // Update mouse state (check for new hovered button, etc.)
-        self.mutate_with_update_context(|context| {
-            Self::update_drag(context);
-        });
-        self.update_mouse_state(EnumSet::empty(), false, &mut false);
+        for slot in self.coop_pointer_slots() {
+            self.coop_with_pointer(slot, |player| {
+                player.mutate_with_update_context(|context| {
+                    Self::update_drag(context);
+                });
+                player.update_mouse_state(EnumSet::empty(), false, &mut false);
+            });
+        }
 
         // GC
         self.gc_arena.borrow_mut().collect_debt();
@@ -3215,6 +3400,7 @@ impl PlayerBuilder {
                 middle_pressed: None,
                 forced_cursor: None,
                 updating_drop_target: false,
+                coop: Default::default(),
             },
             avm1_shared_objects: HashMap::new(),
             avm2_shared_objects: HashMap::new(),
@@ -3311,6 +3497,8 @@ impl PlayerBuilder {
                 stage_mouse_override: None,
                 mouse_cursor: MouseCursor::Arrow,
                 mouse_cursor_needs_check: false,
+                coop_local: 0,
+                coop_hidden: Default::default(),
 
                 // Misc. state
                 // TODO: AVM1 and AVM2 use separate RNGs (though algorithm is same), so this is technically incorrect.

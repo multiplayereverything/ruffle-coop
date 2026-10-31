@@ -105,15 +105,17 @@ impl RuffleGui {
         }
 
         if let Some(player) = player.as_deref_mut() {
-            let (labels, notice, chat, cursors) = crate::coop::session()
+            let (labels, notice, chat, cursors, debug) = crate::coop::session()
                 .map(|session| {
                     let cursors = session.friend_cursors(player);
-                    (session.labels(), session.notice(), session.chat_view(), cursors)
+                    let debug = if crate::coop::mouse_debug() { session.mouse_debug(player) } else { vec![] };
+                    (session.labels(), session.notice(), session.chat_view(), cursors, debug)
                 })
                 .unwrap_or_default();
             show_chat(egui_ctx, &chat.0, chat.1.as_deref());
             show_labels(egui_ctx, player, &labels, menu_height_offset);
             show_cursors(egui_ctx, player, &cursors, menu_height_offset);
+            show_mouse_debug(egui_ctx, player, &debug, menu_height_offset);
             if let Some(notice) = notice {
                 Area::new(Id::new("coop-notice"))
                     .anchor(Align2::CENTER_TOP, vec2(0.0, 40.0))
@@ -229,31 +231,69 @@ fn show_labels(
     }
 }
 
-/// Ruffle Together: the other players' mice, an arrow in their colour with their name (only
-/// while friends may click the game; the picture only).
-fn show_cursors(egui_ctx: &egui::Context, player: &mut Player, cursors: &[(String, u8, i32, i32, bool)], menu_height_offset: f64) {
-    const COLOURS: [Color32; 4] = [
-        Color32::from_rgb(224, 64, 64),
-        Color32::from_rgb(48, 112, 240),
-        Color32::from_rgb(48, 176, 80),
-        Color32::from_rgb(224, 160, 32),
-    ];
+/// Ruffle Together: each player's colour for cursors and the mouse debug overlay.
+const PLAYER_COLOURS: [Color32; 4] = [
+    Color32::from_rgb(224, 64, 64),
+    Color32::from_rgb(48, 112, 240),
+    Color32::from_rgb(48, 176, 80),
+    Color32::from_rgb(224, 160, 32),
+];
+
+/// Ruffle Together: the other players' mice, an arrow in their colour with their name (the
+/// picture only).
+fn show_cursors(egui_ctx: &egui::Context, player: &mut Player, cursors: &[crate::coop::session::FriendCursor], menu_height_offset: f64) {
     if cursors.is_empty() {
         return;
     }
     let painter = egui_ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("coop-cursors")));
     let points = egui_ctx.pixels_per_point() as f64;
-    for (name, slot, x, y, down) in cursors {
-        let (x, y) = player.coop_window_position(*x, *y);
+    for cursor in cursors {
+        let (x, y) = player.coop_window_position(cursor.x, cursor.y);
         let at = pos2((x / points) as f32, ((y + menu_height_offset) / points) as f32);
-        let colour = COLOURS[*slot as usize % COLOURS.len()];
-        let size = if *down { 1.3 } else { 1.0 };
+        let colour = PLAYER_COLOURS[cursor.slot as usize % PLAYER_COLOURS.len()].gamma_multiply(cursor.alpha);
+        let black = Color32::BLACK.gamma_multiply(cursor.alpha);
+        let size = if cursor.down { 1.3 } else { 1.0 };
         let arrow = vec![at, at + vec2(0.0, 16.0) * size, at + vec2(4.5, 12.0) * size, at + vec2(11.0, 11.0) * size];
-        painter.add(egui::Shape::convex_polygon(arrow, colour, egui::Stroke::new(1.5, Color32::BLACK)));
+        painter.add(egui::Shape::convex_polygon(arrow, colour, egui::Stroke::new(1.5, black)));
         let font = FontId::proportional(12.0);
         let text_at = at + vec2(12.0, 14.0);
-        painter.text(text_at + vec2(1.0, 1.0), Align2::LEFT_TOP, name, font.clone(), Color32::BLACK);
-        painter.text(text_at, Align2::LEFT_TOP, name, font, colour);
+        painter.text(text_at + vec2(1.0, 1.0), Align2::LEFT_TOP, &cursor.name, font.clone(), black);
+        painter.text(text_at, Align2::LEFT_TOP, &cursor.name, font, colour);
+    }
+}
+
+/// Ruffle Together: the mouse debug overlay: a ring at every player's mouse (filled while pressed,
+/// grey where the rules keep it out of the game) and a line saying what it is on.
+fn show_mouse_debug(
+    egui_ctx: &egui::Context,
+    player: &mut Player,
+    mice: &[(String, crate::coop::mice::MouseDebug)],
+    menu_height_offset: f64,
+) {
+    if mice.is_empty() {
+        return;
+    }
+    let painter = egui_ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("coop-mouse-debug")));
+    let points = egui_ctx.pixels_per_point() as f64;
+    let font = FontId::monospace(11.0);
+    for (name, mouse) in mice {
+        let (x, y) = player.coop_window_position(mouse.x, mouse.y);
+        let at = pos2((x / points) as f32, ((y + menu_height_offset) / points) as f32);
+        let colour = if mouse.allowed { PLAYER_COLOURS[mouse.slot as usize % PLAYER_COLOURS.len()] } else { Color32::GRAY };
+        if mouse.down {
+            painter.circle_filled(at, 7.0, colour);
+        }
+        painter.circle_stroke(at, 7.0, egui::Stroke::new(2.0, colour));
+        let line = format!(
+            "{name}: {} ({}, {}){}",
+            mouse.hovered.as_deref().unwrap_or("-"),
+            mouse.x / 20,
+            mouse.y / 20,
+            if mouse.allowed { "" } else { " out" }
+        );
+        let text_at = at + vec2(10.0, -18.0);
+        painter.text(text_at + vec2(1.0, 1.0), Align2::LEFT_TOP, &line, font.clone(), Color32::BLACK);
+        painter.text(text_at, Align2::LEFT_TOP, &line, font.clone(), colour);
     }
 }
 

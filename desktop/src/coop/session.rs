@@ -186,10 +186,25 @@ pub struct Session {
     chat_at: std::collections::BTreeMap<u32, Vec<(u8, String)>>,
     /// Chat lines heard (name, text, when), for the window.
     chat_log: VecDeque<(String, String, Instant)>,
+    /// Each player's mouse input and when it last moved, so an idle friend's cursor fades.
+    cursor_moved: [Option<((i32, i32), Instant)>; crate::coop::lockstep::MAX_PLAYERS],
     stall_explained: bool,
     /// Tests: leave without a goodbye, as a killed Ruffle does.
     #[cfg(test)]
     vanish: bool,
+}
+
+/// Another player's cursor as this PC draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FriendCursor {
+    pub name: String,
+    pub slot: u8,
+    /// Stage twips.
+    pub x: i32,
+    pub y: i32,
+    pub down: bool,
+    /// 1 shown, fading to 0 while it doesn't move.
+    pub alpha: f32,
 }
 
 /// What the heartbeat thread knows about this PC's game, shared with the session.
@@ -732,6 +747,7 @@ impl Session {
             chat_to_send: None,
             chat_at: Default::default(),
             chat_log: VecDeque::new(),
+            cursor_moved: [None; crate::coop::lockstep::MAX_PLAYERS],
             stall_explained: false,
             #[cfg(test)]
             vanish: false,
@@ -987,9 +1003,13 @@ impl Session {
                     }
                 }
             }
-            // this player's own hover: their live mouse (a script's when scripted)
-            let own = self.mouse.or_else(|| inputs.get(self.local_index as usize).and_then(|input| input.mouse));
-            self.stepper.set_local_mouse(own.map(|(x, y, _)| (x, y)));
+            for (slot, input) in inputs.iter().enumerate().take(self.cursor_moved.len()) {
+                if let Some((x, y, _)) = input.mouse
+                    && self.cursor_moved[slot].is_none_or(|(at, _)| at != (x, y))
+                {
+                    self.cursor_moved[slot] = Some(((x, y), Instant::now()));
+                }
+            }
             self.stepper.step(player, &inputs);
             for (who, whose) in self.stepper.take_busy() {
                 if who == self.local_index {
@@ -1209,15 +1229,30 @@ impl Session {
         pings
     }
 
-    /// The other players' cursors (name, slot, stage twips, button), only while one is over
-    /// something that player may click.
-    pub fn friend_cursors(&self, player: &mut ruffle_core::Player) -> Vec<(String, u8, i32, i32, bool)> {
+    /// The other players' cursors for the window to draw, as the `cursors` rule says, each with
+    /// how visible it is: one that hasn't moved for a while fades out (the picture only).
+    pub fn friend_cursors(&self, player: &mut ruffle_core::Player) -> Vec<FriendCursor> {
+        const SHOWN: Duration = Duration::from_secs(3);
+        const FADE: Duration = Duration::from_millis(500);
         self.stepper
             .friend_cursors(player)
             .into_iter()
             .filter(|&(slot, ..)| !self.lockstep.is_gone(slot))
-            .map(|(slot, x, y, down)| (self.name(slot), slot, x, y, down))
+            .filter_map(|(slot, x, y, down)| {
+                let idle = self.cursor_moved[slot as usize].map_or(Duration::ZERO, |(_, at)| at.elapsed());
+                let alpha = if down || idle < SHOWN {
+                    1.0
+                } else {
+                    1.0 - (idle - SHOWN).as_secs_f32() / FADE.as_secs_f32()
+                };
+                (alpha > 0.0).then(|| FriendCursor { name: self.name(slot), slot, x, y, down, alpha })
+            })
             .collect()
+    }
+
+    /// Every player's mouse for the mouse debug overlay (`--coop-mouse-debug`), with their name.
+    pub fn mouse_debug(&self, player: &mut ruffle_core::Player) -> Vec<(String, crate::coop::mice::MouseDebug)> {
+        self.stepper.mouse_debug(player).into_iter().map(|mouse| (self.name(mouse.slot), mouse)).collect()
     }
 
     /// The name tags the game asked for (`coop.label`), for the window to draw.

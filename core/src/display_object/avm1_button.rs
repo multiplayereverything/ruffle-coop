@@ -2,6 +2,7 @@ use crate::avm1::{Activation, ActivationIdentifier, NativeObject, Object, Value}
 use crate::avm2::StageObject as Avm2StageObject;
 use crate::backend::audio::AudioManager;
 use crate::backend::ui::MouseCursor;
+use crate::character::Character;
 use crate::context::{ActionType, RenderContext, UpdateContext};
 use crate::display_object::container::{
     ChildContainer, dispatch_added_event, dispatch_removed_event,
@@ -49,9 +50,21 @@ pub struct Avm1ButtonData<'gc> {
     state: Cell<ButtonState>,
     tracking: Cell<ButtonTracking>,
     initialized: Cell<bool>,
-    /// Ruffle Together: pictures of the Up and Over states, so each PC can draw the button as its
-    /// own player's mouse sees it (built once each; empty if that state can't be drawn that way).
-    coop_pictures: RefLock<[Option<Vec<DisplayObject<'gc>>>; 2]>,
+    /// Ruffle Together: the Up, Over and Down states' art, so each PC can draw the button as its
+    /// own player's mouse sees it (built once).
+    coop_pictures: RefLock<Option<[Vec<CoopPart<'gc>>; 3]>>,
+}
+
+/// Ruffle Together: one piece of a button state's art: a copy of artwork that runs no code, or
+/// (`copy: None`) a clip the button must have at that depth right now.
+#[derive(Clone, Collect)]
+#[collect(no_drop)]
+pub struct CoopPart<'gc> {
+    #[collect(require_static)]
+    depth: Depth,
+    #[collect(require_static)]
+    id: CharacterId,
+    copy: Option<DisplayObject<'gc>>,
 }
 
 #[derive(Clone, Collect)]
@@ -106,7 +119,7 @@ impl<'gc> Avm1Button<'gc> {
                     },
                 ),
                 state: Cell::new(ButtonState::Up),
-                coop_pictures: RefLock::new([None, None]),
+                coop_pictures: RefLock::new(None),
                 initialized: Cell::new(false),
                 object: Lock::new(None),
                 tracking: Cell::new(if button.is_track_as_menu {
@@ -142,71 +155,92 @@ impl<'gc> Avm1Button<'gc> {
         }
     }
 
+    /// Ruffle Together: builds, once, the art of the Up, Over and Down states for drawing on one
+    /// PC. Shapes, text and bitmaps are copied without post-instantiation, so no names, counters
+    /// or scripts of the game are touched; a clip is never copied: that state is drawn only while
+    /// the button has the same clip at that depth (a clip shared by the states).
+    pub fn coop_prepare(self, context: &mut UpdateContext<'gc>) {
+        if self.0.coop_pictures.borrow().is_some() {
+            return;
+        }
+        let movie = self.movie();
+        let pictures = [ButtonState::Up, ButtonState::Over, ButtonState::Down].map(|state| {
+            let mut records: Vec<swf::ButtonRecord> = self
+                .0
+                .shared
+                .cell
+                .borrow()
+                .records
+                .iter()
+                .filter(|record| record.states.contains(state.into()))
+                .cloned()
+                .collect();
+            records.sort_by_key(|record| record.depth);
+            let mut parts = vec![];
+            for record in &records {
+                let library = context.library.library_for_movie_mut(movie);
+                let artwork = matches!(
+                    library.character_by_id(record.id),
+                    Some(
+                        Character::Graphic(_)
+                            | Character::Text(_)
+                            | Character::MorphShape(_)
+                            | Character::Bitmap(_)
+                            | Character::EditText(_)
+                    )
+                );
+                let copy = if artwork {
+                    let Some(child) = library.instantiate_by_id(record.id, context.gc_context) else {
+                        continue;
+                    };
+                    child.set_parent(context, Some(self.into()));
+                    child.set_depth(record.depth.into());
+                    child.set_matrix(record.matrix.into());
+                    child.set_color_transform(record.color_transform);
+                    child.set_blend_mode(record.blend_mode.into());
+                    child.set_filters(record.filters.iter().map(Filter::from).collect());
+                    Some(child)
+                } else {
+                    None
+                };
+                parts.push(CoopPart { depth: record.depth.into(), id: record.id, copy });
+            }
+            parts
+        });
+        *unlock!(Gc::write(context.gc(), self.0), Avm1ButtonData, coop_pictures).borrow_mut() = Some(pictures);
+    }
+
+    /// Ruffle Together: draws the button in `state` instead of the game's state; false if that
+    /// state's art isn't ready or needs a clip the button doesn't have right now.
+    fn coop_draw(self, context: &mut RenderContext<'_, 'gc>, state: ButtonState) -> bool {
+        let pictures = self.0.coop_pictures.borrow();
+        let Some(pictures) = pictures.as_ref() else {
+            return false;
+        };
+        let parts = &pictures[state as usize];
+        let mut objects = Vec::with_capacity(parts.len());
+        for part in parts {
+            match part.copy {
+                Some(copy) => objects.push(copy),
+                None => match self.child_by_depth(part.depth) {
+                    Some(child) if child.id() == part.id => objects.push(child),
+                    _ => return false,
+                },
+            }
+        }
+        if objects.is_empty() {
+            return false;
+        }
+        for object in objects {
+            object.render(context);
+        }
+        true
+    }
+
     /// Set the state of a button, creating or destroying children as needed.
     ///
     /// This function instantiates children and thus must not be called whilst
     /// the caller is holding a write lock on the button data.
-    /// Ruffle Together: builds, once, a picture of the button's Up or Over state for drawing on
-    /// one PC only. Only artwork that runs no code (shapes, text, bitmaps) is copied, and without
-    /// post-instantiation, so no names, counters or scripts of the game are touched. False if that
-    /// state has anything else (a movie clip could run code): then it isn't drawn this way.
-    pub fn coop_picture(self, context: &mut UpdateContext<'gc>, state: ButtonState) -> bool {
-        let index = match state {
-            ButtonState::Up => 0,
-            ButtonState::Over => 1,
-            ButtonState::Down => return false,
-        };
-        if let Some(children) = &self.0.coop_pictures.borrow()[index] {
-            return !children.is_empty();
-        }
-        let movie = self.movie();
-        let mut records: Vec<swf::ButtonRecord> = self
-            .0
-            .shared
-            .cell
-            .borrow()
-            .records
-            .iter()
-            .filter(|record| record.states.contains(state.into()))
-            .cloned()
-            .collect();
-        records.sort_by_key(|record| record.depth);
-        let mut children = vec![];
-        for record in &records {
-            let Some(child) = context.library.library_for_movie_mut(movie).instantiate_by_id(record.id, context.gc_context)
-            else {
-                continue;
-            };
-            let artwork = matches!(
-                child,
-                DisplayObject::Graphic(_)
-                    | DisplayObject::Text(_)
-                    | DisplayObject::MorphShape(_)
-                    | DisplayObject::Bitmap(_)
-                    | DisplayObject::EditText(_)
-            );
-            if !artwork {
-                children.clear();
-                break;
-            }
-            child.set_parent(context, Some(self.into()));
-            child.set_depth(record.depth.into());
-            child.set_matrix(record.matrix.into());
-            child.set_color_transform(record.color_transform);
-            child.set_blend_mode(record.blend_mode.into());
-            child.set_filters(record.filters.iter().map(Filter::from).collect());
-            children.push(child);
-        }
-        let drawable = !children.is_empty();
-        unlock!(Gc::write(context.gc(), self.0), Avm1ButtonData, coop_pictures).borrow_mut()[index] = Some(children);
-        drawable
-    }
-
-    /// Ruffle Together: the game's state of the button (Up, Over, Down).
-    pub fn coop_state(self) -> ButtonState {
-        self.0.state.get()
-    }
-
     pub fn set_state(mut self, context: &mut UpdateContext<'gc>, state: ButtonState) {
         let mut removed_depths: fnv::FnvHashSet<_> =
             self.iter_render_list().map(|o| o.depth()).collect();
@@ -398,22 +432,13 @@ impl<'gc> TDisplayObject<'gc> for Avm1Button<'gc> {
     }
 
     fn render_self(self, context: &mut RenderContext<'_, 'gc>) {
-        // Ruffle Together: with each player's own hover, this PC draws the button as its own
-        // player's mouse sees it (Over under it, Up otherwise), whatever the host's mouse does to
-        // the game's button; a press (Down) is drawn as it is
-        let state = self.0.state.get();
-        if context.stage.coop_own_hover() && state != ButtonState::Down && !context.is_offscreen {
-            let index = if self.base().is_coop_show_over() { 1 } else { 0 };
-            let want = if index == 1 { ButtonState::Over } else { ButtonState::Up };
-            if want != state
-                && let Some(children) = &self.0.coop_pictures.borrow()[index]
-                && !children.is_empty()
-            {
-                for child in children {
-                    child.render(context);
-                }
-                return;
-            }
+        // Ruffle Together: this PC draws the button as its own player's mouse sees it
+        if !context.is_offscreen
+            && let Some(state) = context.stage.coop_button_state(self.into())
+            && state != self.0.state.get()
+            && self.coop_draw(context, state)
+        {
+            return;
         }
         self.render_children(context);
     }

@@ -6,6 +6,7 @@ pub mod discord;
 pub mod frame;
 pub mod keymap;
 pub mod lockstep;
+pub mod mice;
 pub mod navigator;
 pub mod net;
 pub mod protocol;
@@ -42,6 +43,18 @@ pub fn goodbye(reason: &str) {
             reason: reason.to_string(),
         });
     }
+}
+
+/// The mouse debug overlay (`--coop-mouse-debug`): every player's mouse, what it is on, and whether
+/// the rules let it be there.
+static MOUSE_DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_mouse_debug(on: bool) {
+    MOUSE_DEBUG.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn mouse_debug() -> bool {
+    MOUSE_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The running session; None in normal (single-player) use, where nothing changes.
@@ -138,6 +151,10 @@ pub struct CoopOpt {
     /// then gets a Join button (ruffle-together://join/ID/CODE through the join page).
     #[clap(long, value_name = "ID", help_heading = "Ruffle Together")]
     pub coop_link_id: Option<String>,
+
+    /// Testing: show every player's mouse, what it is on, and whether the rules let it be there.
+    #[clap(long, help_heading = "Ruffle Together")]
+    pub coop_mouse_debug: bool,
 
     /// Your name, shown to the other players.
     #[clap(long, default_value = "Player", help_heading = "Ruffle Together")]

@@ -912,13 +912,6 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.set_flag(DisplayObjectFlags::COOP_NOT_DRAWN, value);
     }
 
-    pub(crate) fn is_coop_show_over(&self) -> bool {
-        self.contains_flag(DisplayObjectFlags::COOP_SHOW_OVER)
-    }
-
-    pub(crate) fn set_coop_show_over(&self, value: bool) {
-        self.set_flag(DisplayObjectFlags::COOP_SHOW_OVER, value);
-    }
 
     /// Ruffle Together: shows or hides the clip for mouse picking only, without the side
     /// effects of `_visible` (focus); the caller puts it back.
@@ -3163,10 +3156,6 @@ bitflags! {
         /// Ruffle Together: a clip this PC doesn't draw (another player's private screen). The
         /// picture only: the game still has it.
         const COOP_NOT_DRAWN          = 1 << 19;
-
-        /// Ruffle Together: a button this PC draws in its Over state (this player's own hover).
-        /// The picture only: the game's button stays as it is.
-        const COOP_SHOW_OVER          = 1 << 20;
     }
 }
 

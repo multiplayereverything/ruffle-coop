@@ -92,10 +92,10 @@ pub struct StageData<'gc> {
     /// screen only (never in `BitmapData.draw`), so it changes the picture and not the game.
     coop_camera: Cell<Matrix>,
 
-    /// Ruffle Together: the button this PC draws in its Over state (this player's own hover).
-    coop_hovered: Lock<Option<DisplayObject<'gc>>>,
+    /// Ruffle Together: what this PC's player's mouse is on and is pressing, for drawing buttons.
+    coop_view: Lock<(Option<DisplayObject<'gc>>, Option<DisplayObject<'gc>>)>,
 
-    /// Ruffle Together: buttons are drawn by this PC's own player's hover (`hover: own`).
+    /// Ruffle Together: buttons are drawn by this PC's player's own mouse (`hover: own`).
     coop_own_hover: Cell<bool>,
 
     /// Matrix used for rendering the letterbox.
@@ -198,7 +198,7 @@ impl<'gc> Stage<'gc> {
                 movie: Lock::new(movie),
                 viewport_matrix: Cell::new(Matrix::IDENTITY),
                 coop_camera: Cell::new(Matrix::IDENTITY),
-                coop_hovered: Lock::new(None),
+                coop_view: Lock::new((None, None)),
                 coop_own_hover: Cell::new(false),
                 letterbox_matrix: Cell::new(Matrix::IDENTITY),
                 focus_tracker: FocusTracker::new(gc_context),
@@ -229,16 +229,34 @@ impl<'gc> Stage<'gc> {
         self.0.viewport_matrix.get()
     }
 
-    /// Ruffle Together: the button this PC draws in its Over state, if any.
-    pub fn coop_hovered(self) -> Option<DisplayObject<'gc>> {
-        self.0.coop_hovered.get()
+    /// Ruffle Together: what this PC's player's mouse is on and is pressing.
+    pub fn coop_view(self) -> (Option<DisplayObject<'gc>>, Option<DisplayObject<'gc>>) {
+        self.0.coop_view.get()
     }
 
-    pub fn set_coop_hovered(self, mc: &Mutation<'gc>, hovered: Option<DisplayObject<'gc>>) {
-        unlock!(Gc::write(mc, self.0), StageData, coop_hovered).set(hovered);
+    pub fn set_coop_view(self, mc: &Mutation<'gc>, view: (Option<DisplayObject<'gc>>, Option<DisplayObject<'gc>>)) {
+        unlock!(Gc::write(mc, self.0), StageData, coop_view).set(view);
     }
 
-    /// Ruffle Together: whether buttons are drawn by this PC's own player's hover.
+    /// Ruffle Together: the state this PC draws a button in, by its own player's mouse: Down while
+    /// it presses the button, Over while it is on it (or pressed it and moved off), Up otherwise.
+    /// `None` while buttons are drawn as the game has them.
+    pub fn coop_button_state(self, button: DisplayObject<'gc>) -> Option<crate::display_object::ButtonState> {
+        use crate::display_object::ButtonState;
+        if !self.0.coop_own_hover.get() {
+            return None;
+        }
+        let (hovered, pressed) = self.0.coop_view.get();
+        let on = hovered.is_some_and(|o| DisplayObject::ptr_eq(o, button));
+        let pressing = pressed.is_some_and(|o| DisplayObject::ptr_eq(o, button));
+        Some(match (on, pressing) {
+            (true, true) => ButtonState::Down,
+            (true, false) | (false, true) => ButtonState::Over,
+            (false, false) => ButtonState::Up,
+        })
+    }
+
+    /// Ruffle Together: whether buttons are drawn by this PC's player's own mouse.
     pub fn coop_own_hover(self) -> bool {
         self.0.coop_own_hover.get()
     }

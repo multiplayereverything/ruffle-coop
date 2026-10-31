@@ -7,16 +7,20 @@
 //! ExternalInterface.call("coop.mouseY", slot)
 //! ExternalInterface.call("coop.mouseDown", slot) that slot's left button
 //! ExternalInterface.call("coop.clicked", slot)   true on the frame that slot pressed its left button
-//! ExternalInterface.call("coop.mouse", mode)     who may click the game: "host", "zones" (friends only in
-//!                                                their own zone), "buttons" (friends on clickable things
-//!                                                too) or "all"
+//! ExternalInterface.call("coop.mouse", mode)     where friends' mice are in the game: "host" (nowhere),
+//!                                                "zones" (their own zone), "buttons" (clickable things) or "all"
+//! ExternalInterface.call("coop.mouse", slot, mode)  ... for one player (coop.mouse(mode) resets them all)
+//! ExternalInterface.call("coop.mouse.clicker")   during a player's mouse events (onPress, onRelease, CLICK...),
+//!                                                whose mouse it is; undefined otherwise
+//! ExternalInterface.call("coop.mouse.hovered", slot)  the path of what that player's mouse is on, or undefined
+//! ExternalInterface.call("coop.mouse.cursors", mode)  friends' cursors: "auto" (where they may click), "on", "off"
 //! ExternalInterface.call("coop.zone", slot, x, y, w, h)  only that slot may click in the box; (slot) clears its boxes
 //! ExternalInterface.call("coop.only", path)      a private screen: only the player who opened it sees and clicks it
 //! ExternalInterface.call("coop.only", slot, path)  ... only that slot; coop.shared(path) makes it everyone's again
 //! ExternalInterface.call("coop.only", path, pattern)  ... and while it is someone's, nobody else may click the
 //!                                                buttons that open it (pattern: "_root.players.*.instance*")
-//! ExternalInterface.call("coop.hover", mode)     "host": the game's own hover follows the host (the default),
-//!                                                "own": Button symbols' Over art follows each player's mouse, "off"
+//! ExternalInterface.call("coop.hover", mode)     "own": each screen draws Button symbols as its own player's
+//!                                                mouse sees them (the default), "shared": as the game has them
 //! ExternalInterface.call("coop.typed", slot)     what that slot typed this frame ("\b" Backspace, "\n" Enter)
 //! ExternalInterface.call("coop.option", name)    the host's setting (--coop-option NAME=VALUE), or undefined
 //! ExternalInterface.call("coop.options")         every setting, as an object
@@ -46,7 +50,10 @@ use std::sync::{Arc, Mutex};
 
 pub const VERSION: u8 = 2;
 /// What `coop.has` says yes to.
-pub const FEATURES: &[&str] = &["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat", "clicks", "zones", "private", "hover"];
+pub const FEATURES: &[&str] = &[
+    "players", "mouse", "name", "camera", "hud", "label", "keys", "buttons", "typed", "options", "ping", "events", "chat",
+    "clicks", "zones", "private", "hover", "pointers", "clicker", "hovered", "cursors",
+];
 
 /// Events kept for a game that doesn't read them (the oldest go first).
 const MAX_EVENTS: usize = 100;
@@ -92,14 +99,19 @@ pub struct CoopApi {
     pub mouse: [(i32, i32, bool); MAX_PLAYERS],
     /// Each slot pressed its left button this frame (`coop.clicked`).
     pub clicked: [bool; MAX_PLAYERS],
-    /// Who may click the game, and the boxes only one player may click: the key map's at first,
-    /// then whatever the game says (`coop.mouse`, `coop.zone`).
+    /// Where friends' mice are in the game (for every friend, and per friend), and the clips and
+    /// boxes only one player may click: the key map's at first, then whatever the game says.
     pub mouse_mode: crate::coop::keymap::MouseMode,
+    pub mouse_modes: [Option<crate::coop::keymap::MouseMode>; MAX_PLAYERS],
     pub zones: Vec<crate::coop::keymap::Zone>,
     /// Private screens: drawn only on their owner's PC, clicked only by them.
     pub privates: Vec<Private>,
-    /// How hover works while friends may click (None: the host's, as in the game).
-    pub hover: Option<crate::coop::keymap::Hover>,
+    pub hover: crate::coop::keymap::Hover,
+    pub cursors: crate::coop::keymap::Cursors,
+    /// Whose mouse events run right now (`coop.mouse.clicker`).
+    pub clicker: Option<u8>,
+    /// What each player's mouse is on, as of the last frame.
+    pub hovered: [Option<String>; MAX_PLAYERS],
     /// Each slot's held buttons this frame (the same bits as `lockstep::UP` etc.).
     pub buttons: [u16; MAX_PLAYERS],
     /// What happened that the game hasn't read yet (`coop.events`), oldest first.
@@ -133,9 +145,13 @@ impl CoopApi {
             mouse: [(0, 0, false); MAX_PLAYERS],
             clicked: [false; MAX_PLAYERS],
             mouse_mode: Default::default(),
+            mouse_modes: [None; MAX_PLAYERS],
             zones: vec![],
             privates: vec![],
-            hover: None,
+            hover: Default::default(),
+            cursors: Default::default(),
+            clicker: None,
+            hovered: Default::default(),
             buttons: [0; MAX_PLAYERS],
             typed: Default::default(),
             options: vec![],
@@ -178,6 +194,11 @@ impl CoopApi {
         self.events.push_back(event);
     }
 
+    /// Where player `slot`'s mouse is in the game.
+    pub fn mouse_mode_of(&self, slot: u8) -> crate::coop::keymap::MouseMode {
+        self.mouse_modes.get(slot as usize).copied().flatten().unwrap_or(self.mouse_mode)
+    }
+
     /// The camera this PC draws with.
     pub fn local_camera(&self) -> Option<Camera> {
         self.cameras[self.local_slot as usize]
@@ -203,9 +224,26 @@ impl CoopApi {
             ("coop.mouseY", Some(slot)) => Value::Number(self.mouse[slot].1 as f64 / 20.0),
             ("coop.mouseDown", Some(slot)) => Value::Bool(self.mouse[slot].2),
             ("coop.clicked", Some(slot)) => Value::Bool(self.clicked[slot]),
+            ("coop.mouse", Some(slot)) if slot > 0 => match text(1).and_then(|mode| crate::coop::keymap::MouseMode::named(&mode)) {
+                Some(mode) => {
+                    self.mouse_modes[slot] = Some(mode);
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
             ("coop.mouse", _) => match text(0).and_then(|mode| crate::coop::keymap::MouseMode::named(&mode)) {
                 Some(mode) => {
                     self.mouse_mode = mode;
+                    self.mouse_modes = [None; MAX_PLAYERS];
+                    Value::Bool(true)
+                }
+                None => Value::Bool(false),
+            },
+            ("coop.mouse.clicker", _) => self.clicker.map_or(Value::Undefined, |slot| Value::Number(slot.into())),
+            ("coop.mouse.hovered", Some(slot)) => self.hovered[slot].clone().map_or(Value::Undefined, Value::String),
+            ("coop.mouse.cursors", _) => match text(0).and_then(|mode| crate::coop::keymap::Cursors::named(&mode)) {
+                Some(cursors) => {
+                    self.cursors = cursors;
                     Value::Bool(true)
                 }
                 None => Value::Bool(false),
@@ -268,7 +306,7 @@ impl CoopApi {
             }
             ("coop.hover", _) => match text(0).and_then(|mode| crate::coop::keymap::Hover::named(&mode)) {
                 Some(hover) => {
-                    self.hover = Some(hover);
+                    self.hover = hover;
                     Value::Bool(true)
                 }
                 None => Value::Bool(false),
@@ -396,8 +434,31 @@ mod tests {
         let with_openers = [Value::String("_root.pcb".into()), Value::String("_root.players.*.instance*".into())];
         assert_eq!(api.answer("coop.only", &with_openers), Value::Bool(true));
         assert_eq!(api.privates.last().and_then(|p| p.openers.as_deref()), Some("_root.players.*.instance*"));
-        assert_eq!(api.answer("coop.hover", &[Value::String("host".into())]), Value::Bool(true));
-        assert_eq!(api.hover, Some(crate::coop::keymap::Hover::Host));
+        assert_eq!(api.answer("coop.hover", &[Value::String("shared".into())]), Value::Bool(true));
+        assert_eq!(api.hover, crate::coop::keymap::Hover::Shared);
+    }
+
+    /// One friend's mouse on its own; whose events run; what each mouse is on; friends' cursors.
+    #[test]
+    fn mice_per_player() {
+        use crate::coop::keymap::{Cursors, MouseMode};
+        let mut api = CoopApi::new(3, 0);
+        assert_eq!(api.answer("coop.mouse", &[s("zones")]), Value::Bool(true));
+        assert_eq!(api.answer("coop.mouse", &[n(2.0), s("all")]), Value::Bool(true));
+        assert_eq!((api.mouse_mode_of(1), api.mouse_mode_of(2)), (MouseMode::Zones, MouseMode::All));
+        assert_eq!(api.answer("coop.mouse", &[n(0.0), s("all")]), Value::Bool(false), "the host's mouse is always in");
+        assert_eq!(api.answer("coop.mouse", &[s("host")]), Value::Bool(true));
+        assert_eq!(api.mouse_mode_of(2), MouseMode::Host, "coop.mouse(mode) is everyone's");
+        assert_eq!(api.answer("coop.mouse.clicker", &[]), Value::Undefined);
+        api.clicker = Some(2);
+        assert_eq!(api.answer("coop.mouse.clicker", &[]), n(2.0));
+        api.hovered[1] = Some("_root.menu.sword".into());
+        assert_eq!(api.answer("coop.mouse.hovered", &[n(1.0)]), s("_root.menu.sword"));
+        assert_eq!(api.answer("coop.mouse.hovered", &[n(2.0)]), Value::Undefined);
+        assert_eq!(api.answer("coop.mouse.cursors", &[s("off")]), Value::Bool(true));
+        assert_eq!(api.cursors, Cursors::Off);
+        assert_eq!(api.answer("coop.mouse.cursors", &[s("some")]), Value::Bool(false));
+        assert_eq!(api.answer("coop.has", &[s("clicker")]), Value::Bool(true));
     }
 
     fn n(v: f64) -> Value {

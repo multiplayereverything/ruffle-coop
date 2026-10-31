@@ -16,8 +16,8 @@ package {
      *   UP DOWN LEFT RIGHT  move your dot        FIRE  ring around your dot
      *   KEY1  switch the game's key map (menu: FIRE = Enter, play: FIRE = Space)
      *   KEY3  your camera off / on
-     *   Red / Blue / Green buttons: anyone clicks them (coop.mouse "buttons"); Bob's switch only
-     *   player 2 (coop.zone)
+     *   Red / Blue / Green buttons: anyone clicks them with their own mouse (Coop.mouse.setMode
+     *   "buttons"); the sign says who (Coop.mouse.clicker); Bob's switch only player 2 (a zone)
      *   typing goes to your line of the name board; Enter makes it your dot's label
      *
      * Gameplay reads only shared answers. localSlot, isHost and ping only reach the HUD's text.
@@ -29,7 +29,7 @@ package {
         private static const BUTTONS:Array = ["UP", "DOWN", "LEFT", "RIGHT", "FIRE", "ALT", "KEY1", "KEY2", "KEY3", "KEY4",
             "VIEW", "QUIT", "YES", "NO", "MENU"];
         private static const FEATURES:Array = ["players", "mouse", "name", "camera", "hud", "label", "keys", "buttons",
-            "typed", "options", "ping", "events", "chat", "teleport"];
+            "typed", "options", "ping", "events", "chat", "pointers", "clicker", "hovered", "cursors", "teleport"];
         private static const MENU_KEYS:String = "slot 0: FIRE=13\nslot 1: FIRE=13\nslot 2: FIRE=13\nslot 3: FIRE=13\n";
         private static const PLAY_KEYS:String = "slot 0: FIRE=32\nslot 1: FIRE=32\nslot 2: FIRE=32\nslot 3: FIRE=32\n";
 
@@ -59,9 +59,9 @@ package {
         private var clicks:Array = [];
 
         public function CoopDemo() {
-            n = RuffleTogether.players();
-            speed = Number(RuffleTogether.option("speed") || "6");
-            zoom = Number(RuffleTogether.option("zoom") || "1");
+            n = Coop.players.count();
+            speed = Number(Coop.room.option("speed") || "6");
+            zoom = Number(Coop.room.option("zoom") || "1");
 
             world.name = "world";
             addChild(world);
@@ -112,8 +112,8 @@ package {
             board = text(6, 478, 390, 120, 12);
             log = text(404, 478, 390, 120, 11);
 
-            RuffleTogether.hud("root.hud");
-            RuffleTogether.keys(PLAY_KEYS);
+            Coop.view.pinHud("root.hud");
+            Coop.input.setKeys(PLAY_KEYS);
             stage.addEventListener(KeyboardEvent.KEY_DOWN, onKey);
             addEventListener(Event.ENTER_FRAME, tick);
         }
@@ -143,8 +143,8 @@ package {
                 switchOn = !switchOn;
                 setSign(null, 0);
             });
-            RuffleTogether.mouse("buttons");
-            RuffleTogether.zone(1, 636, 376, 118, 58);
+            Coop.mouse.setMode("buttons");
+            Coop.zones.giveBox(1, 636, 376, 118, 58);
         }
 
         private var signColour:String = "NONE";
@@ -152,7 +152,9 @@ package {
         private function setSign(colour:String, count:int):void {
             if (colour != null) signColour = colour;
             signClicks += count;
-            signText.text = "SIGN: " + signColour + " (" + signClicks + " clicks)   Bob's switch: " + (switchOn ? "ON" : "off");
+            var by:int = Coop.mouse.clicker();
+            signText.text = "SIGN: " + signColour + " (" + signClicks + " clicks)   Bob's switch: " + (switchOn ? "ON" : "off")
+                + (by >= 0 ? "   by P" + (by + 1) : "");
             trace("frame " + frame + " " + signText.text);
         }
 
@@ -238,7 +240,7 @@ package {
 
         private function tick(e:Event):void {
             frame++;
-            for each (var ev:String in RuffleTogether.events()) {
+            for each (var ev:String in Coop.room.events()) {
                 events.unshift("f" + frame + " " + ev);
             }
             while (events.length > 7) {
@@ -246,7 +248,7 @@ package {
             }
 
             for (var s:int = 0; s < n; s++) {
-                var bits:int = RuffleTogether.buttons(s);
+                var bits:int = Coop.input.buttons(s);
                 var dot:Sprite = dots[s];
                 if (bits & 1) dot.y -= speed;
                 if (bits & 2) dot.y += speed;
@@ -254,24 +256,24 @@ package {
                 if (bits & 8) dot.x += speed;
                 dot.x = Math.max(30, Math.min(W - 30, dot.x));
                 dot.y = Math.max(30, Math.min(H - 30, dot.y));
-                rings[s].visible = RuffleTogether.button(s, "FIRE");
+                rings[s].visible = Coop.input.held(s, "FIRE");
                 if (pressed(s, bits, 64)) {
                     menuKeys = !menuKeys;
-                    RuffleTogether.keys(menuKeys ? MENU_KEYS : PLAY_KEYS);
+                    Coop.input.setKeys(menuKeys ? MENU_KEYS : PLAY_KEYS);
                 }
                 if (pressed(s, bits, 256)) {
                     cameraOn[s] = !cameraOn[s];
                 }
                 held[s] = bits;
-                if (RuffleTogether.clicked(s)) {
-                    clicks[s] = "f" + frame + " at " + Math.round(RuffleTogether.mouseX(s)) + "," + Math.round(RuffleTogether.mouseY(s));
+                if (Coop.mouse.clicked(s)) {
+                    clicks[s] = "f" + frame + " at " + Math.round(Coop.mouse.x(s)) + "," + Math.round(Coop.mouse.y(s));
                 }
 
-                cursors[s].x = RuffleTogether.mouseX(s);
-                cursors[s].y = RuffleTogether.mouseY(s);
-                cursors[s].scaleX = cursors[s].scaleY = RuffleTogether.mouseDown(s) ? 2.5 : 1;
+                cursors[s].x = Coop.mouse.x(s);
+                cursors[s].y = Coop.mouse.y(s);
+                cursors[s].scaleX = cursors[s].scaleY = Coop.mouse.down(s) ? 2.5 : 1;
 
-                var typed:String = RuffleTogether.typed(s);
+                var typed:String = Coop.input.typed(s);
                 for (var i:int = 0; i < typed.length; i++) {
                     var c:String = typed.charAt(i);
                     if (c == "\b") {
@@ -283,11 +285,11 @@ package {
                         lines[s] += c;
                     }
                 }
-                RuffleTogether.label(s, "root.world.p" + s, RuffleTogether.name(s) + (given[s] ? " \"" + given[s] + "\"" : ""));
+                Coop.view.label(s, "root.world.p" + s, Coop.players.name(s) + (given[s] ? " \"" + given[s] + "\"" : ""));
                 if (cameraOn[s]) {
-                    RuffleTogether.camera(s, dot.x, dot.y, zoom);
+                    Coop.camera.setView(s, dot.x, dot.y, zoom);
                 } else {
-                    RuffleTogether.cameraOff(s);
+                    Coop.camera.off(s);
                 }
             }
             show();
@@ -295,13 +297,13 @@ package {
 
         /** The HUD's text: the only place local answers (localSlot, isHost, ping) go. */
         private function show():void {
-            var me:int = RuffleTogether.localSlot();
+            var me:int = Coop.players.local();
             var has:Array = [];
             for each (var f:String in FEATURES) {
-                has.push(f + (RuffleTogether.has(f) ? "+" : "-"));
+                has.push(f + (Coop.room.has(f) ? "+" : "-"));
             }
             var opts:Array = [];
-            var all:Object = RuffleTogether.options();
+            var all:Object = Coop.room.options();
             for (var k:String in all) {
                 opts.push(k + "=" + all[k]);
             }
@@ -309,21 +311,22 @@ package {
             var pings:Array = [];
             var who:Array = [];
             for (var s:int = 0; s < n; s++) {
-                var p:int = RuffleTogether.ping(s);
+                var p:int = Coop.players.ping(s);
                 pings.push("P" + (s + 1) + " " + (p < 0 ? "?" : p + "ms"));
                 var names:Array = [];
-                var bits:int = RuffleTogether.buttons(s);
+                var bits:int = Coop.input.buttons(s);
                 for (var b:int = 0; b < BUTTONS.length; b++) {
                     if (bits & (1 << b)) names.push(BUTTONS[b]);
                 }
-                who.push("P" + (s + 1) + " " + RuffleTogether.name(s) + " at " + Math.round(dots[s].x) + "," + Math.round(dots[s].y)
-                    + "  buttons=" + bits + " " + names.join("|") + (RuffleTogether.button(s, "FIRE") ? " (FIRE!)" : "")
-                    + "  mouse " + Math.round(RuffleTogether.mouseX(s)) + "," + Math.round(RuffleTogether.mouseY(s))
-                    + (RuffleTogether.mouseDown(s) ? " DOWN" : "") + "  camera " + (cameraOn[s] ? "on" : "OFF"));
+                who.push("P" + (s + 1) + " " + Coop.players.name(s) + " at " + Math.round(dots[s].x) + "," + Math.round(dots[s].y)
+                    + "  buttons=" + bits + " " + names.join("|") + (Coop.input.held(s, "FIRE") ? " (FIRE!)" : "")
+                    + "  mouse " + Math.round(Coop.mouse.x(s)) + "," + Math.round(Coop.mouse.y(s))
+                    + (Coop.mouse.down(s) ? " DOWN" : "") + "  on " + (Coop.mouse.hovered(s) || "-")
+                    + "  camera " + (cameraOn[s] ? "on" : "OFF"));
             }
-            info.text = "RUFFLE TOGETHER API DEMO   frame " + frame + "   version " + RuffleTogether.version()
+            info.text = "RUFFLE TOGETHER API DEMO   frame " + frame + "   version " + Coop.room.version()
                 + "   players " + n + "\n"
-                + "THIS PC: slot " + me + " (P" + (me + 1) + ")   isHost " + RuffleTogether.isHost() + "   ping " + pings.join("  ") + "\n"
+                + "THIS PC: slot " + me + " (P" + (me + 1) + ")   isHost " + Coop.players.isHost() + "   ping " + pings.join("  ") + "\n"
                 + "has: " + has.join(" ") + "\n"
                 + "options: " + (opts.length ? opts.join("  ") : "(none)") + "   (speed " + speed + ", zoom " + zoom + ")\n"
                 + who.join("\n") + "\n"

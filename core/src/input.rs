@@ -327,6 +327,16 @@ impl InputManager {
         self.is_key_down(button.into())
     }
 
+    /// Ruffle Together: sets a mouse button as held or not without an event, when switching
+    /// between players' mice.
+    pub(crate) fn coop_set_mouse_down(&mut self, button: MouseButton, down: bool) {
+        if down {
+            self.keys_down.insert(button.into());
+        } else {
+            self.keys_down.remove(&button.into());
+        }
+    }
+
     pub fn get_mouse_down_buttons(&self) -> EnumSet<MouseButton> {
         let mut buttons = EnumSet::new();
         if self.is_mouse_down(MouseButton::Left) {
