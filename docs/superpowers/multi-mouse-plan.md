@@ -105,3 +105,11 @@ library, so a game writes `Coop.camera.setPosition(1, 400, 300)` instead of `Ext
   now have pointers); each must still match itself twice.
 - API demo: replay twice, 4 headless players through the relay, 4 real windows.
 - CF2 in two windows: player 2's arrows light up under player 2's mouse.
+
+## When it ships
+
+The skill repo (flash-multiplayer-skill) documents 1.0.3.9 only. In the release after it, copy `docs/coop-api.md`
+into its `playbook/coop-api.md` (links to the ruffle-together repo, as there), and update `flash-coop`, `flash-lab`
+and `playbook/ruffle-together.md`: every player has a mouse, `hover: own | shared`, `coop.mouse.clicker`,
+`coop.mouse.hovered`, `cursors:`, `mouse N:`, `--coop-mouse-debug`, and the `Coop` library instead of
+`RuffleTogether.as`.
