@@ -68,6 +68,7 @@ how-it-works
 make/index
 make/key-maps
 make/first-game
+make/existing-game
 make/tips
 make/testing
 ```

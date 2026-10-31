@@ -14,9 +14,10 @@ that says which keys each player's buttons press. The SWF doesn't change at all.
 
 :::{grid-item-card} 2. The game is single-player
 Add players to the SWF: extra heroes that each follow one player's buttons, read through the co-op API.
-Cameras, name tags and the player count come with it.
+Cameras, name tags and the player count come with it. Most games are someone else's SWF: decompile it and add
+your code next to the game's.
 
-{doc}`Your first co-op game → <first-game>`
+{doc}`Your first co-op game → <first-game>` · {doc}`Modding a game you didn't write → <existing-game>`
 :::
 
 :::{grid-item-card} 3. You're making a new game
