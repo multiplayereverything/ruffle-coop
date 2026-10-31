@@ -36,6 +36,7 @@ Built-in key maps (`--coop-keys <name>`):
 | Intrusion / Intrusion 2 | 2-4 | `intrusion`, `intrusion-2` |
 | Air Battle | 2-4 | `air-battle` |
 | Ultimate Crab Battle | 2-4 | `ultimate-crab-battle` |
+| Chaos Faction 2 | 2 | `chaos-faction-2` (each player picks their own character card) |
 
 Any other game can bring its own key map as a small text file, and games built for Ruffle Together can set their own
 from inside the game (Dad 'n Me does).
@@ -49,6 +50,16 @@ from inside the game (Dad 'n Me does).
   long as the last one takes.
 - A friend who leaves doesn't end the game: everyone else plays on.
 - Chat: press `/`, type, Enter. Names typed into the game's own text boxes reach every PC.
+- Discord shows "Playing GAME, room ABCDE (2 of 2)" on the profile of anyone who shares their activity.
+
+**The mouse**
+- Flash has one mouse, so by default only the host clicks. A game or its key map can let friends click too:
+  anything clickable, or only inside their own area, like their own card on a character screen.
+- Clicks that land in the same frame take turns, so none are lost (tested with 4 players).
+- Private screens: a pop-up such as a player editor or a shop belongs to the player who opened it. Only their PC
+  draws it and only they click it.
+- While friends may click, each player's cursor shows in the other windows, in their colour with their name, over
+  the things that player may click.
 
 **Fair and in sync**
 - Everyone gets the same small input delay, picked from the ping (1 frame on a LAN).
@@ -117,10 +128,23 @@ Get your game into Ruffle Together, or build a Flash game for it from the start.
 
    The number of `slot` lines is how many players the game has; `shared` makes every slot press the same keys
    (hot-seat games). Buttons: `UP DOWN LEFT RIGHT FIRE ALT KEY1-KEY4 VIEW QUIT YES NO MENU`.
+   A key map can also set the mouse without changing the SWF:
+
+   ```
+   mouse: zones
+   zone 1: _root.players.p2
+   private: _root.pcb opened-by _root.players.*.instance*
+   ```
+
+   `mouse: host` (the default), `buttons`, `zones` or `all` says who clicks; `zone N: <clip>` gives a player the
+   buttons inside a clip; `private:` makes a pop-up belong to whoever opened it; `hover: host`, `own` or `off`
+   picks how hover looks while friends click.
 2. **Talk to the co-op API.** A game can ask about the players through `ExternalInterface`, in AS2 and AS3:
    - players: `coop.players`, `coop.name(slot)`, `coop.isHost`, `coop.ping(slot)`, `coop.version`, `coop.has(feature)`
    - input: `coop.buttons(slot)`, `coop.button(slot, "FIRE")`, each player's mouse, `coop.typed(slot)`, and
      `coop.keys(text)` to set its own key map
+   - the mouse: `coop.mouse(mode)`, `coop.zone(slot, path)`, `coop.clicked(slot)`, `coop.hover(mode)`, and
+     private screens with `coop.only(path)` / `coop.shared(path)`
    - the host's settings: `coop.option(name)`, `coop.options`
    - the picture: a camera per player (`coop.camera`), a HUD that stays on screen (`coop.hud`), name tags
      (`coop.label`)
