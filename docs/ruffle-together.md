@@ -1,6 +1,6 @@
 # Ruffle Together
 
-Version 1.0.3.9 (build id `rc-1.0.3.9#<commit>`; players must use the same build).
+Version 1.0.4 (build id `rc-1.0.4#<commit>`; players must use the same build).
 
 Play a local-multiplayer Flash game online with up to 3 friends. Every PC runs the same game in this Ruffle
 build; only the key presses travel, and every frame runs on every PC with every player's keys. Everyone gets
@@ -39,8 +39,9 @@ The relay needs the `ruffle-coop` game in mods-info first.
   Gun Mayhem 2: Z or T to shoot, X or Y for a grenade. The host is player 1, friends follow in join order.
 - `--coop-players N` (host): start with N players (2-4, as many as the game has keys for); the game starts
   once all have joined. `--coop-keys <game>`: every player must give the same.
-- Only the host's mouse works in the game's own menus; games built for co-op read every player's mouse (see
-  the co-op API below).
+- Every player has their own mouse, but by default only the host's is in the game. A game's key map (or the game)
+  lets friends' mice in where they belong, e.g. each player on their own card of a character screen; there they
+  hover and click like the host's, several players at once (see the co-op API below).
 - `--coop-delay N` (host): a fixed input delay in frames. Without it the host pings the friends when they
   connect and picks the smallest delay that runs smoothly (about 1 frame per 67 ms of ping; with 3-4
   players a friend's keys go through the host, so the two worst pings count together).
@@ -108,8 +109,9 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 | `ExternalInterface.call("coop.mouseX", slot)` | that slot's mouse x, in stage pixels (the same space as `_root._xmouse` / `stage.mouseX`) |
 | `ExternalInterface.call("coop.mouseY", slot)` | that slot's mouse y |
 | `ExternalInterface.call("coop.mouseDown", slot)` | `true` while that slot's left mouse button is down |
+| `ExternalInterface.call("coop.mouse.clicker")` | inside a mouse handler, the slot whose mouse caused it |
 | `ExternalInterface.call("coop.version")` | the API version (2) |
-| `ExternalInterface.call("coop.has", feature)` | `true` if this build has the feature: `"camera"`, `"hud"`, `"label"`, `"keys"`, `"name"`, `"mouse"` |
+| `ExternalInterface.call("coop.has", feature)` | `true` if this build has the feature: `"camera"`, `"pointers"`, `"clicker"`, ... (the full list is in coop-api.md) |
 | `ExternalInterface.call("coop.name", slot)` | that player's name |
 | `ExternalInterface.call("coop.isHost")` | `true` on the host's PC. **Never for gameplay**, like `localSlot` |
 | `ExternalInterface.call("coop.camera", slot, x, y, zoom)` | sets that slot's camera: stage point (x, y) at the middle of that player's screen, `zoom` 1 = normal. `("coop.camera", slot)` turns it off |
@@ -117,11 +119,12 @@ A game made for Ruffle Together can ask about the players through `ExternalInter
 | `ExternalInterface.call("coop.label", slot, path, text)` | a name tag above the clip at `path`, on every PC; `""` removes it |
 | `ExternalInterface.call("coop.keys", text)` | the game's own key map (the `.keys` format below), used from the next frame |
 
-**Easier: the helper library.** `tools/coop-api/as2/RuffleTogether.as` (AS2, any SWF version: it does the
-SWF 6/7 unhide step for you) and `tools/coop-api/as3/RuffleTogether.as` (AS3) wrap every call:
-`RuffleTogether.active()`, `players()`, `localSlot()`, `name(slot)`, `has("camera")`, `mouseX(slot)`,
-`camera(slot, x, y, zoom)`, `hud(path)`, `label(slot, path, text)`, `keys(text)`. Outside Ruffle Together they
-fall back to single-player answers (1 player, slot 0, no camera), so one SWF works everywhere.
+**Easier: the library.** `tools/coop-api/as3/Coop*.as` (AS3: copy every file) and `tools/coop-api/as2/Coop.as`
+(AS2, any SWF version: `#include "Coop.as"`; it does the SWF 6/7 unhide step for you) group every call:
+`Coop.players.count()`, `Coop.players.name(slot)`, `Coop.mouse.x(slot)`, `Coop.mouse.clicker()`,
+`Coop.camera.setPosition(slot, x, y)`, `Coop.view.label(slot, path, text)`, `Coop.input.setKeys(text)` and the rest
+(the groups are listed in coop-api.md). Outside Ruffle Together they fall back to single-player answers (1 player,
+slot 0, no camera), so one SWF works everywhere. The older flat `RuffleTogether.as` still works.
 
 - **In co-op or not:** `ExternalInterface.available && ExternalInterface.call("coop.players") > 0`. In plain Ruffle
   or Flash Player this is false: use the normal mouse and treat this PC as slot 0.
@@ -131,9 +134,10 @@ fall back to single-player answers (1 player, slot 0, no camera), so one SWF wor
   (found by the Bow Man session, SWF 6).
 - Every PC's mouse travels with its keys, so every answer except `localSlot` is the same on every PC for the same
   frame. A slot whose mouse hasn't moved yet reads (0, 0), up. A slot number outside 0..players-1 returns undefined.
-- **The normal mouse is the host's:** `_xmouse`/`_ymouse`, `stage.mouseX`/`mouseY`, mouse events, buttons and
-  `Mouse` listeners all follow slot 0's mouse on every PC (only the host can click the menus). A game that aims
-  with the mouse for every player reads each slot through the API, slot 0 included.
+- **Every player's mouse:** the game's own mouse events (`onRelease`, `CLICK`, roll over and out) come from every
+  player whose mouse is in the game (`coop.mouse`, zones); inside a handler `_xmouse` / `stage.mouseX` is that
+  player's and `coop.mouse.clicker` says who. Outside handlers `_xmouse` / `stage.mouseX` is the host's. A game that
+  aims with the mouse for every player reads each slot through the API, slot 0 included.
 - **`localSlot` rule:** it is different on every PC, so nothing the game simulates may depend on it, and it must
   not move, show/hide, create or remove display objects: the sync check compares every object's position,
   visibility, depth and frame on every PC, and a difference shows OUT OF SYNC. Safe: the text of a text field that
