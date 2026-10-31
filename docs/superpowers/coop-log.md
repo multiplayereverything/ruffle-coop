@@ -410,3 +410,10 @@ Plan: docs/superpowers/plans/2026-10-28-ruffle-together.md · Spec: docs/superpo
   (a first try hung before the start, the relay's), 4 real windows room NM65M: identical logs, the three friends'
   presses on the same frame 270 (was 270/271/272), `by P2/P3/P4`, player 4 refused on Bob's switch. Chaos Faction 2
   replay identical twice (67a7e305; was 18b022a3: friends now have mice).
+- Release 1.0.4 (a7d989b, user: "push and release"): one mouse per player, hover own/shared, mouse N:, cursors:,
+  coop.mouse.clicker / hovered, the Coop library, --coop-mouse-debug; docs page "Modding a game you didn't write"
+  pushed to master (6fe08df, Read the Docs). Clean build (exe names a7d989b), tests 161/161; replays BIC fa623659,
+  GM2 8e30f66c, TW ad6fe22d; API demo 4p replay twice 10073f2d; CF2 replay twice 67a7e305; live relay
+  165.232.82.11:25569 with the packaged exe: BIC 1500 frames (room EFM8K) and API demo 1500 frames (room UDRUE)
+  desync_at=none. Zip sha256 ff4b25ad20b8dd677e0def2787ee18723009edc2820d575b151c4dfc0dea23e2 (re-downloaded, same),
+  exe 38d2b25287478d311818faa613935f93693dfe152eb3de1f6c4f57f9498ca034. mods-info not changed yet (asked first).
